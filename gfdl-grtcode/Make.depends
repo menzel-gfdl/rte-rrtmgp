@@ -1,0 +1,5 @@
+GFDL_GRTCODE_SRC = mo_gas_optics_gfdl-grtcode.o
+
+mo_gas_optics_gfdl-grtcode.o: mo_rte_kind.o mo_gas_concentrations.o mo_optical_props.o \
+                              mo_source_functions.o mo_gas_optics.o \
+                              mo_gas_optics_gfdl-grtcode.F90

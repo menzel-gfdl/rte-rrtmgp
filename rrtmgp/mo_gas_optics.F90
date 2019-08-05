@@ -47,9 +47,9 @@ module mo_gas_optics
     ! Compute gas optical depth given temperature, pressure, and composition
     !
     function gas_optics_ext_abstract(this,                         &
-                                     play, plev, tlay, gas_desc,   & ! mandatory inputs
-                                     optical_props, toa_src,       & ! mandatory outputs
-                                     col_dry) result(error_msg)      ! optional input
+                                     play, plev, tlay, gas_desc,   &  ! mandatory inputs
+                                     optical_props, toa_src,       &  ! mandatory outputs
+                                     col_dry, tlev) result(error_msg) ! optional input
       import ty_gas_optics, wp, ty_gas_concs, ty_optical_props_arry
       class(ty_gas_optics), intent(in) :: this
       real(wp), dimension(:,:), intent(in   ) :: play, &   ! layer pressures [Pa, mb]; (ncol,nlay)
@@ -62,7 +62,8 @@ module mo_gas_optics
       character(len=128)                      :: error_msg
       ! Optional inputs
       real(wp), dimension(:,:), intent(in   ), &
-                             optional, target :: col_dry ! Column dry amount; dim(ncol,nlay)
+                             optional, target :: col_dry, & ! Column dry amount; dim(ncol,nlay)
+                                                   tlev        ! level temperatures [K]l (ncol,nlay+1)
     end function gas_optics_ext_abstract
     !--------------------------------------------------------------------------------------------------------------------
     !

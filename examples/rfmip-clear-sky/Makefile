@@ -7,8 +7,6 @@
 #
 # RRTMGP library, module files
 #
-LDFLAGS   += -L$(RRTMGP_DIR)
-LIBS      += -lrrtmgp -lrte
 FCINCLUDE += -I$(RRTMGP_DIR)
 
 #
@@ -16,8 +14,6 @@ FCINCLUDE += -I$(RRTMGP_DIR)
 # C and Fortran interfaces respectively
 #
 FCINCLUDE += -I$(NFHOME)/include
-LDFLAGS   += -L$(NFHOME)/lib -L$(NCHOME)/lib
-LIBS      += -lnetcdff -lnetcdf
 
 #
 # Setting macro TIMING=yes uses routines from the General Purpose Timing Library
@@ -41,7 +37,7 @@ VPATH = ../
 
 # Compilation rules
 %.o: %.F90
-	$(FC) $(FCFLAGS) $(FCINCLUDE) -c $<
+	$(FC) $(FCFLAGS) $(FCINCLUDE) $(CPPFLAGS) -c $<
 
 %: %.o
 	$(FC) $(FCFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
@@ -49,7 +45,7 @@ VPATH = ../
 #
 # Ancillary codes
 #
-ADDITIONS = mo_simple_netcdf.o mo_rfmip_io.o mo_load_coefficients.o
+ADDITIONS = argparse.o mo_simple_netcdf.o mo_rfmip_io.o mo_load_coefficients.o
 
 all: rrtmgp_rfmip_lw rrtmgp_rfmip_sw
 
@@ -65,5 +61,7 @@ mo_rfmip_io.o:          mo_rfmip_io.F90          mo_simple_netcdf.o
 
 mo_load_coefficients.o: mo_load_coefficients.F90 mo_simple_netcdf.o
 
+argparse.o: argparse.F90
+
 clean:
-	-rm rrtmgp_rfmip_sw rrtmgp_rfmip_lw *.o *.mod *.optrpt
+	rm -f rrtmgp_rfmip_sw rrtmgp_rfmip_lw *.o *.mod *.optrpt

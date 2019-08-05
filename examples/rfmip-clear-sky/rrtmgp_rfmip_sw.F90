@@ -84,18 +84,25 @@ program rrtmgp_rfmip_sw
   use gptl,                  only: gptlstart, gptlstop, gptlinitialize, gptlpr, gptlfinalize, gptlsetoption, &
                                    gptlpercent, gptloverhead
 #endif
+
+  use, intrinsic :: iso_c_binding, only: c_char, c_double
+  use argparse
+  use mo_gas_optics, only: ty_gas_optics
+  use mo_gas_optics_gfdl_grtcode, only: ty_gas_optics_gfdl_grtcode
+  use rs_utils, only: rs_set_verbosity
+
   implicit none
   ! --------------------------------------------------
   !
   ! Local variables
   !
-  character(len=132) :: rfmip_file = 'multiple_input4MIPs_radiation_RFMIP_UColorado-RFMIP-1-2_none.nc', &
-                        kdist_file = 'coefficients_sw.nc'
+  character(len=132) :: rfmip_file
+  character(len=132) :: kdist_file
   character(len=132) :: flxdn_file, flxup_file
-  integer            :: nargs, ncol, nlay, nbnd, ngpt, nexp, nblocks, block_size, forcing_index
+  integer            :: ncol, nlay, nbnd, ngpt, nexp, nblocks, block_size, forcing_index
   logical            :: top_at_1
   integer            :: b, icol, ibnd, igpt
-  character(len=4)   :: block_size_char, forcing_index_char = '1'
+  character(len=16) :: forcing_index_char
 
   character(len=32 ), &
             dimension(:),             allocatable :: kdist_gas_names, rfmip_gas_games
@@ -107,7 +114,7 @@ program rrtmgp_rfmip_sw
   !
   ! Classes used by rte+rrtmgp
   !
-  type(ty_gas_optics_rrtmgp)                     :: k_dist
+  type(ty_gas_optics_rrtmgp), target :: k_dist
   type(ty_optical_props_2str)                    :: optical_props
   type(ty_fluxes_broadband)                      :: fluxes
 
@@ -123,38 +130,82 @@ program rrtmgp_rfmip_sw
 #ifdef USE_TIMING
   integer :: ret, i
 #endif
+
+  type(Parser_t) :: parser
+  type(ty_gas_optics_gfdl_grtcode), target :: molecular_lines
+  class(ty_gas_optics), pointer :: optics => null()
+  character(len=512) :: buffer
+  character(len=16) :: model
+  character(len=16), parameter :: rrtmgp = "RRTMGP"
+  character(len=16), parameter :: grtcode = "GFDL-GRTCODE"
+
   ! -------------------------------------------------------------------------------------------------
   !
-  ! Code starts
-  !   all arguments are optional
-  !
-  print *, "Usage: rrtmgp_rfmip_sw [block_size] [rfmip_file] [k-distribution_file] [forcing_index (1,2,3)]"
-  nargs = command_argument_count()
-  call read_size(rfmip_file, ncol, nlay, nexp)
-  if(nargs >= 1) then
-    call get_command_argument(1, block_size_char)
-    read(block_size_char, '(i4)') block_size
+  !Parse command line arguments.
+  parser = create_parser()
+  call add_argument(parser, "-b", "Block size.", requires_val=.true., &
+                    long_name="--block-size")
+  call add_argument(parser, "-r", "RFMIP file.", requires_val=.true., &
+                    long_name="--rfmip-file")
+  call add_argument(parser, "-k", "K-distribution file.", requires_val=.true., &
+                    long_name="--k-dist")
+  call add_argument(parser, "-f", "Forcing index (1, 2, or 3).", requires_val=.true., &
+                    long_name="--forcing-index")
+  call add_argument(parser, "-m", "Model ("//trim(rrtmgp)//" or "//trim(grtcode)//").", &
+                    requires_val=.true., long_name="--model")
+  call add_argument(parser, "-n", "Namelist file.", requires_val=.true., &
+                    long_name="--namelist")
+  call parse_args(parser)
+
+  call get_argument(parser, "-r", buffer)
+  if (trim(buffer) .eq. "not present") then
+    rfmip_file = "multiple_input4MIPs_radiation_RFMIP_UColorado-RFMIP-1-2_none.nc"
   else
+    rfmip_file = trim(buffer)
+  endif
+  call read_size(rfmip_file, ncol, nlay, nexp)
+
+  call get_argument(parser, "-b", buffer)
+  if (trim(buffer) .eq. "not present") then
     block_size = ncol
-  end if
-  if(nargs >= 2) call get_command_argument(2, rfmip_file)
-  if(nargs >= 3) call get_command_argument(3, kdist_file)
-  if(nargs >= 4) then
-    call get_command_argument(4, forcing_index_char)
-  end if
-
-  !
-  ! How big is the problem? Does it fit into blocks of the size we've specified?
-  !
-  if(mod(ncol*nexp, block_size) /= 0 ) call stop_on_err("rrtmgp_rfmip_sw: number of columns doesn't fit evenly into blocks.")
+  else
+    read(buffer, "(i4)") block_size
+  endif
+  if (mod(ncol*nexp, block_size) .ne. 0) then
+    call stop_on_err("rrtmgp_rfmip_sw: number of columns doesn't fit evenly into blocks.")
+  endif
   nblocks = (ncol*nexp)/block_size
-  print *, "Doing ",  nblocks, "blocks of size ", block_size
+  print *, "Doing", nblocks, "blocks of size ", block_size
 
-  read(forcing_index_char, '(i4)') forcing_index
-  if(forcing_index < 1 .or. forcing_index > 3) &
-    stop "Forcing index is invalid (must be 1,2 or 3)"
-  flxdn_file = 'rsd_Efx_RTE-RRTMGP-181204_rad-irf_r1i1p1f' // trim(forcing_index_char) // '_gn.nc'
-  flxup_file = 'rsu_Efx_RTE-RRTMGP-181204_rad-irf_r1i1p1f' // trim(forcing_index_char) // '_gn.nc'
+  call get_argument(parser, "-k", buffer)
+  if (trim(buffer) .eq. "not present") then
+    kdist_file = "coefficients_sw.nc"
+  else
+    kdist_file = trim(buffer)
+  endif
+
+  call get_argument(parser, "-f", forcing_index_char)
+  if (trim(forcing_index_char) .eq. "not present") then
+    forcing_index_char = "1"
+  endif
+  read(forcing_index_char, "(i4)") forcing_index
+  if (forcing_index .lt. 1 .or. forcing_index .gt. 3) then
+    call stop_on_err("Forcing index is invalid (must be 1, 2, or 3).")
+  endif
+
+  call get_argument(parser, "-m", buffer)
+  if (trim(buffer) .eq. "not present") then
+    model = trim(rrtmgp)
+  else
+    model = trim(buffer)
+  endif
+  if (trim(model) .ne. trim(rrtmgp) .and. trim(model) .ne. trim(grtcode)) then
+    call stop_on_err("Model is invalid (must be "//trim(rrtmgp)//" or "//trim(grtcode)//").")
+  endif
+  flxdn_file = "rsd_Efx_RTE-"//trim(model)//"-181204_rad-irf_r1i1p1f"// &
+               trim(forcing_index_char)//"_gn.nc"
+  flxup_file = "rsu_Efx_RTE-"//trim(model)//"-181204_rad-irf_r1i1p1f"// &
+               trim(forcing_index_char)//"_gn.nc"
 
   !
   ! Identify the set of gases used in the calculation based on the forcing index
@@ -182,29 +233,46 @@ program rrtmgp_rfmip_sw
   !
   call read_and_block_gases_ty(rfmip_file, block_size, kdist_gas_names, rfmip_gas_games, gas_conc_array)
   call read_and_block_sw_bc(rfmip_file, block_size, surface_albedo, total_solar_irradiance, solar_zenith_angle)
-  !
-  ! Read k-distribution information. load_and_init() reads data from netCDF and calls
-  !   k_dist%init(); users might want to use their own reading methods
-  !
-  call load_and_init(k_dist, trim(kdist_file), gas_conc_array(1))
-  if(.not. k_dist%source_is_external()) &
-    stop "rrtmgp_rfmip_sw: k-distribution file isn't SW"
-  nbnd = k_dist%get_nband()
-  ngpt = k_dist%get_ngpt()
 
-  allocate(toa_flux(block_size, k_dist%get_ngpt()), &
+  if (trim(model) .eq. trim(rrtmgp)) then
+    !
+    ! Read k-distribution information. load_and_init() reads data from netCDF and calls
+    !   k_dist%init(); users might want to use their own reading methods
+    !
+    call load_and_init(k_dist, trim(kdist_file), gas_conc_array(1))
+    if (.not. k_dist%source_is_external()) then
+      call stop_on_err("rrtmgp_rfmip_sw: k-distribution file isn't SW")
+    endif
+
+    !
+    ! RRTMGP won't run with pressure less than its minimum. The top level in the RFMIP file
+    !   is set to 10^-3 Pa. Here we pretend the layer is just a bit less deep.
+    !   This introduces an error but shows input sanitizing.
+    !
+    if(top_at_1) then
+      p_lev(:,1,:) = k_dist%get_press_min() + epsilon(k_dist%get_press_min())
+    else
+      p_lev(:,nlay+1,:) &
+                   = k_dist%get_press_min() + epsilon(k_dist%get_press_min())
+    end if
+    optics => k_dist
+
+  elseif (trim(model) .eq. trim(grtcode)) then
+    !Initialize the GFDL-GRTCODE line-by-line model.
+    call get_argument(parser, "-n", buffer)
+    if (trim(buffer) .eq. "not present") then
+      call stop_on_err("Namelist file currently required when using GFDL-GRTCODE.")
+    endif
+    call rs_set_verbosity(3)
+    call stop_on_err(molecular_lines%initialize(buffer, nlay+1, gas_conc_array(1)%gas_name))
+    optics => molecular_lines
+  endif
+
+  nbnd = optics%get_nband()
+  ngpt = optics%get_ngpt()
+
+  allocate(toa_flux(block_size, ngpt), &
            def_tsi(block_size), usecol(block_size,nblocks))
-  !
-  ! RRTMGP won't run with pressure less than its minimum. The top level in the RFMIP file
-  !   is set to 10^-3 Pa. Here we pretend the layer is just a bit less deep.
-  !   This introduces an error but shows input sanitizing.
-  !
-  if(top_at_1) then
-    p_lev(:,1,:) = k_dist%get_press_min() + epsilon(k_dist%get_press_min())
-  else
-    p_lev(:,nlay+1,:) &
-                 = k_dist%get_press_min() + epsilon(k_dist%get_press_min())
-  end if
 
   !
   ! RTE will fail if passed solar zenith angles greater than 90 degree. We replace any with
@@ -223,7 +291,7 @@ program rrtmgp_rfmip_sw
   allocate(flux_up(block_size, nlay+1, nblocks), &
            flux_dn(block_size, nlay+1, nblocks))
   allocate(mu0(block_size), sfc_alb_spec(nbnd,block_size))
-  call stop_on_err(optical_props%alloc_2str(block_size, nlay, k_dist))
+  call stop_on_err(optical_props%alloc_2str(block_size, nlay, optics))
   ! Handle GPU data. Leave mu0, sfc_alb_spec, toa_flux, and def_tsi on CPU for
   ! now, and let compiler or CUDA runtime handle data movement because not
   ! everything is in kernels at the next level down yet.
@@ -244,7 +312,8 @@ program rrtmgp_rfmip_sw
 #ifdef USE_TIMING
   do i = 1, 32
 #endif
-  do b = 1, nblocks
+! do b = 1, nblocks
+  do b = 1,  1
     fluxes%flux_up => flux_up(:,:,b)
     fluxes%flux_dn => flux_dn(:,:,b)
     !
@@ -254,12 +323,13 @@ program rrtmgp_rfmip_sw
 #ifdef USE_TIMING
     ret =  gptlstart('gas_optics (SW)')
 #endif
-    call stop_on_err(k_dist%gas_optics(p_lay(:,:,b), &
+    call stop_on_err(optics%gas_optics(p_lay(:,:,b), &
                                        p_lev(:,:,b),       &
                                        t_lay(:,:,b),       &
                                        gas_conc_array(b),  &
                                        optical_props,      &
-                                       toa_flux))
+                                       toa_flux, &
+                                       tlev=t_lev(:,:,b)))
 #ifdef USE_TIMING
     ret =  gptlstop('gas_optics (SW)')
 #endif
@@ -341,6 +411,14 @@ program rrtmgp_rfmip_sw
   ret = gptlpr(block_size)
   ret = gptlfinalize()
 #endif
+
+  optics => null()
+  if (trim(model) .eq. trim(grtcode)) then
+    !Release memory.
+    call molecular_lines%destroy()
+  endif
+  call destroy_parser(parser)
+
   !!$acc exit data delete(optical_props, optical_props%tau, optical_props%ssa, optical_props%g)
   !!!$acc exit data delete(mu0,sfc_alb_spec,toa_flux,def_tsi)
   ! --------------------------------------------------

@@ -322,8 +322,7 @@ program rrtmgp_rfmip_lw
 #ifdef USE_TIMING
   do i = 1, 32
 #endif
-! do b = 1, nblocks
-  do b = 1,  1
+  do b = 1, nblocks
     fluxes%flux_up => flux_up(:,:,b)
     fluxes%flux_dn => flux_dn(:,:,b)
     !

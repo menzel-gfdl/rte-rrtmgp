@@ -19,7 +19,7 @@ VPATH = $(RTE_DIR):$(RTE_KERNEL_DIR):$(RRTMGP_DIR):$(RRTMGP_KERNEL_DIR)
 
 all: librte.a librrtmgp.a
 
-COMPILE = $(FC) $(FCFLAGS) $(FCINCLUDE) -c
+COMPILE = $(FC) $(FCFLAGS) $(FCINCLUDE) $(CPPFLAGS) -c
 %.o: %.F90
 	$(COMPILE) $<
 

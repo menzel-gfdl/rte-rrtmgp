@@ -570,8 +570,8 @@ function create(this, w0, wn, dw, num_levels, hitran_path, gases, h2o_ctm_dir, &
   call catch_error(spectral_grid_properties(this%spectral_grid, n=num_grid_points))
   allocate(wavenumber_limits(2, num_grid_points))
   do i = 1, num_grid_points
-    wavenumber_limits(1,1) = real(w0 + (i-1)*dw, kind=wp)
-    wavenumber_limits(2,1) = real(w0 + (i-1)*dw, kind=wp)
+    wavenumber_limits(1,i) = real(w0 + (i-1)*dw, kind=wp)
+    wavenumber_limits(2,i) = real(w0 + (i-1)*dw, kind=wp)
   enddo
   error = this%init(wavenumber_limits)
   deallocate(wavenumber_limits)

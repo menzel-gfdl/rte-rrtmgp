@@ -333,100 +333,66 @@ end function vmr_to_ppmv
 
 !> @brief Compute gas optical depth.
 !! @return Error message or empty string.
-function compute_spectra(this, play, plev, gas, tlev, do_rayleigh, optics) &
-  result(error_msg)
+subroutine compute_spectra(this, plev, tlev, ppmv, cfc_ppmv, cia_ppmv, do_rayleigh, optics)
 
   class(ty_gas_optics_gfdl_grtcode), intent(in) :: this !< Gas optics.
-  real(kind=wp), dimension(:,:), intent(in) :: play !< Layer pressure [mb] (column, layer).
-  real(kind=wp), dimension(:,:), intent(in) :: plev !< Level pressure [mb] (column, level).
-  type(ty_gas_concs), intent(in) :: gas !< Gas volume mixing ratios.
-  real(kind=wp), dimension(:,:), intent(in) :: tlev !< Level temperature [K] (column, level).
+  real(kind=wp), dimension(:), intent(in) :: plev !< Level pressure [mb] (level).
+  real(kind=wp), dimension(:), intent(in) :: tlev !< Level temperature [K] (level).
+  real(kind=wp), dimension(:,:), intent(in) :: ppmv !< Gas abundance [ppmv] (level, molecule).
+  real(kind=wp), dimension(:,:), intent(in) :: cfc_ppmv !< CFC abundance [ppmv] (level, molecule).
+  real(kind=wp), dimension(:,:), intent(in) :: cia_ppmv !< Abundance [ppmv] for gases participating
+                                                        !! in collision-induced absorption (level, molecule).
   logical, intent(in) :: do_rayleigh !< Flag to turn rayleigh scattering.
-  type(Optics_t), dimension(:), intent(inout) :: optics
-  character(len=128) :: error_msg
+  type(Optics_t), intent(inout) :: optics
 
   real(kind=wp), parameter :: Patomb = 0.01_wp
-  integer :: num_columns
   integer :: num_levels
-  real(kind=wp), dimension(:), allocatable :: pressure
-  real(kind=wp), dimension(:), allocatable :: temperature
-  real(kind=wp), dimension(:,:,:), allocatable :: ppmv
-  real(kind=wp), dimension(:,:,:), allocatable :: cfc_ppmv
-  real(kind=wp), dimension(:,:,:), allocatable :: cia_ppmv
-  real(kind=wp), dimension(:,:), allocatable :: xh2o
+  real(kind=wp), dimension(size(plev)) :: pressure
   type(Optics_t), dimension(2) :: o
   integer :: i
-  integer :: j
 
-  num_columns = size(play, 1)
-  num_levels = size(plev, 2)
-  allocate(pressure(num_levels))
-  allocate(temperature(num_levels))
-  allocate(xh2o(num_levels, num_columns))
-
-  !Interpolate gas concentrations to pressure levels and convert them to ppmv.
-  xh2o(:,:) = 0._wp
-  error_msg = vmr_to_ppmv(this%molecules, num_levels, num_columns, gas, play, plev, &
-                          xh2o, .true., ppmv)
-  if (error_msg .ne. "") then
-    return
+  num_levels = size(plev)
+  if (do_rayleigh) then
+    do i = 1, size(o)
+      call catch_error(create_optics(o(i), num_levels-1, this%spectral_grid, &
+                       this%device))
+    enddo
   endif
-  error_msg = vmr_to_ppmv(this%cfcs, num_levels, num_columns, gas, play, plev, &
-                          xh2o, .false., cfc_ppmv)
-  if (error_msg .ne. "") then
-    return
-  endif
-  error_msg = vmr_to_ppmv(this%cias, num_levels, num_columns, gas, play, plev, &
-                          xh2o, .false., cia_ppmv)
-  if (error_msg .ne. "") then
-    return
-  endif
-
-  do i = 1, size(o)
-    call catch_error(create_optics(o(i), num_levels-1, this%spectral_grid, this%device))
-  enddo
 
   !Calculate optical depths.
-  do i = 1, num_columns
-    do j = 1, num_levels
-      pressure(j) = plev(i,j)*Patomb
-      temperature(j) = tlev(i,j)
-    enddo
-    if (allocated(this%molecules)) then
-      do j = 1, size(this%molecules)
-        call catch_error(set_molecule_ppmv(this%ml, this%molecules(j)%id, ppmv(:,i,j)))
-      enddo
-    endif
-    if (allocated(this%cfcs)) then
-      do j = 1, size(this%cfcs)
-        call catch_error(set_cfc_ppmv(this%ml, this%cfcs(j)%id, cfc_ppmv(:,i,j)))
-      enddo
-    endif
-    if (allocated(this%cias)) then
-      do j = 1, size(this%cias)
-        call catch_error(set_cia_ppmv(this%ml, this%cias(j)%id, cia_ppmv(:,i,j)))
-      enddo
-    endif
-    if (do_rayleigh) then
-      call catch_error(calculate_optics(this%ml, pressure, temperature, o(1)))
-      call catch_error(rayleigh_scattering(o(2), pressure))
-      call catch_error(add_optics(o, optics(i)))
-    else
-      call catch_error(calculate_optics(this%ml, pressure, temperature, optics(i)))
-    endif
+  do i = 1, num_levels
+    pressure(i) = plev(i)*Patomb
   enddo
+  if (allocated(this%molecules)) then
+    do i = 1, size(this%molecules)
+      call catch_error(set_molecule_ppmv(this%ml, this%molecules(i)%id, ppmv(:,i)))
+    enddo
+  endif
+  if (allocated(this%cfcs)) then
+    do i = 1, size(this%cfcs)
+      call catch_error(set_cfc_ppmv(this%ml, this%cfcs(i)%id, cfc_ppmv(:,i)))
+    enddo
+  endif
+  if (allocated(this%cias)) then
+    do i = 1, size(this%cias)
+      call catch_error(set_cia_ppmv(this%ml, this%cias(i)%id, cia_ppmv(:,i)))
+    enddo
+  endif
+  if (do_rayleigh) then
+    call catch_error(calculate_optics(this%ml, pressure, tlev, o(1)))
+    call catch_error(rayleigh_scattering(o(2), pressure))
+    call catch_error(add_optics(o, optics))
+  else
+    call catch_error(calculate_optics(this%ml, pressure, tlev, optics))
+  endif
 
   !Clean up.
-  do i = 1, size(o)
-    call catch_error(destroy_optics(o(i)))
-  enddo
-  deallocate(pressure)
-  deallocate(temperature)
-  deallocate(ppmv)
-  deallocate(cfc_ppmv)
-  deallocate(cia_ppmv)
-  deallocate(xh2o)
-end function compute_spectra
+  if (do_rayleigh) then
+    do i = 1, size(o)
+      call catch_error(destroy_optics(o(i)))
+    enddo
+  endif
+end subroutine compute_spectra
 
 
 !> @brief Calculate Planck function.
@@ -620,14 +586,19 @@ function gas_optics_ext(this, play, plev, tlay, gas_desc, optical_props, toa_src
 
   integer :: num_columns
   integer :: num_layers
+  integer :: num_levels
   integer(kind=c_int64_t) :: num_wavenumbers
   real(kind=wp), dimension(:,:), allocatable :: tau
   real(kind=wp), dimension(:,:), allocatable :: omega
   real(kind=wp), dimension(:,:), allocatable :: g
-  type(Optics_t), dimension(:), allocatable :: optics
+  type(Optics_t) :: optics
   real(kind=wp), dimension(:), allocatable :: flux
   integer :: i
   integer :: j
+  real(kind=wp), dimension(:,:,:), allocatable :: ppmv
+  real(kind=wp), dimension(:,:,:), allocatable :: cfc_ppmv
+  real(kind=wp), dimension(:,:,:), allocatable :: cia_ppmv
+  real(kind=wp), dimension(:,:), allocatable :: xh2o
 
   if (.not. present(tlev)) then
     error_msg = "Level temperatures are required by GFDL-GRTCODE."
@@ -637,58 +608,63 @@ function gas_optics_ext(this, play, plev, tlay, gas_desc, optical_props, toa_src
     error_msg = "Solar flux is required for shortwave."
     return
   endif
-
   num_columns = size(play, 1)
   num_layers = size(play, 2)
+  num_levels = size(plev, 2)
+
+  !Interpolate gas concentrations to pressure levels and convert them to ppmv.
+  allocate(xh2o(num_levels, num_columns))
+  xh2o(:,:) = 0._wp
+  error_msg = vmr_to_ppmv(this%molecules, num_levels, num_columns, gas_desc, play, plev, &
+                          xh2o, .true., ppmv)
+  if (error_msg .ne. "") then
+    return
+  endif
+  error_msg = vmr_to_ppmv(this%cfcs, num_levels, num_columns, gas_desc, play, plev, &
+                          xh2o, .false., cfc_ppmv)
+  if (error_msg .ne. "") then
+    return
+  endif
+  error_msg = vmr_to_ppmv(this%cias, num_levels, num_columns, gas_desc, play, plev, &
+                          xh2o, .false., cia_ppmv)
+  if (error_msg .ne. "") then
+    return
+  endif
+  deallocate(xh2o)
+
   call catch_error(spectral_grid_properties(this%spectral_grid, n=num_wavenumbers))
   allocate(tau(num_wavenumbers, num_layers))
   allocate(omega(num_wavenumbers, num_layers))
   allocate(g(num_wavenumbers, num_layers))
-  allocate(optics(num_columns))
   allocate(flux(num_wavenumbers))
-
-  !Allocate optics objects.
   do i = 1, num_columns
-    call catch_error(create_optics(optics(i), num_layers, this%spectral_grid, this%device))
-  enddo
-
-  !Calculate the optical depth.
-  error_msg = compute_spectra(this, play, plev, gas_desc, tlev, .true., optics)
-  if (error_msg .ne. "") then
-    return
-  endif
-
-  !Copy optical depths into input structure.
-  select type(optical_props)
-    type is (ty_optical_props_2str)
-      do i = 1, num_columns
-        call catch_error(optical_properties(optics(i), tau, omega, g))
+    call catch_error(create_optics(optics, num_layers, this%spectral_grid, this%device))
+    call compute_spectra(this, plev(i,:), tlev(i,:), ppmv(:,i,:), &
+                         cfc_ppmv(:,i,:), cia_ppmv(:,i,:), .true., optics)
+    select type(optical_props)
+      type is (ty_optical_props_2str)
+        call catch_error(optical_properties(optics, tau, omega, g))
         do j = 1, num_layers
           optical_props%tau(i,j,:) = tau(:,j)
           optical_props%ssa(i,j,:) = omega(:,j)
           optical_props%g(i,j,:) = g(:,j)
         enddo
-      enddo
-    class default
-      error_msg = "2 stream only currently supported."
-      return
-  end select
+      class default
+        error_msg = "2 stream only currently supported."
+        return
+    end select
+    call catch_error(destroy_optics(optics))
+  enddo
+  deallocate(tau)
+  deallocate(omega)
+  deallocate(g)
+  deallocate(flux)
 
   !Copy the incident solar flux.
   call catch_error(solar_flux_properties(this%solar_flux, flux))
   do i = 1, num_columns
     toa_src(i,:) = flux(:)
   enddo
-
-  !Clean up.
-  do i = 1, num_columns
-    call catch_error(destroy_optics(optics(i)))
-  enddo
-  deallocate(optics)
-  deallocate(tau)
-  deallocate(omega)
-  deallocate(g)
-  deallocate(flux)
 end function gas_optics_ext
 
 
@@ -712,46 +688,69 @@ function gas_optics_int(this, play, plev, tlay, tsfc, gas_desc, optical_props, s
 
   integer :: num_columns
   integer :: num_layers
+  integer :: num_levels
   integer(kind=c_int64_t) :: num_wavenumbers
   real(kind=wp), dimension(:,:), allocatable :: tau
-  type(Optics_t), dimension(:), allocatable :: optics
+  type(Optics_t) :: optics
   integer :: i
   integer :: j
   integer :: k
   real(kind=c_double) :: w0
   real(kind=c_double) :: dw
   real(kind=wp) :: w
+  real(kind=wp), dimension(:,:,:), allocatable :: ppmv
+  real(kind=wp), dimension(:,:,:), allocatable :: cfc_ppmv
+  real(kind=wp), dimension(:,:,:), allocatable :: cia_ppmv
+  real(kind=wp), dimension(:,:), allocatable :: xh2o
 
   if (.not. present(tlev)) then
     error_msg = "Level temperatures are required by GFDL-GRTCODE."
     return
   endif
-
   num_columns = size(play, 1)
   num_layers = size(play, 2)
-  call catch_error(spectral_grid_properties(this%spectral_grid, w0=w0, n=num_wavenumbers, &
-                                            dw=dw))
-  allocate(tau(num_wavenumbers, num_layers))
-  allocate(optics(num_columns))
+  num_levels = size(plev, 2)
 
-  !Allocate optics objects.
-  do i = 1, num_columns
-    call catch_error(create_optics(optics(i), num_layers, this%spectral_grid, this%device))
-  enddo
-
-  !Calculate the optical depth.
-  error_msg = compute_spectra(this, play, plev, gas_desc, tlev, .false., optics)
+  !Interpolate gas concentrations to pressure levels and convert them to ppmv.
+  allocate(xh2o(num_levels, num_columns))
+  xh2o(:,:) = 0._wp
+  error_msg = vmr_to_ppmv(this%molecules, num_levels, num_columns, gas_desc, play, plev, &
+                          xh2o, .true., ppmv)
   if (error_msg .ne. "") then
     return
   endif
+  error_msg = vmr_to_ppmv(this%cfcs, num_levels, num_columns, gas_desc, play, plev, &
+                          xh2o, .false., cfc_ppmv)
+  if (error_msg .ne. "") then
+    return
+  endif
+  error_msg = vmr_to_ppmv(this%cias, num_levels, num_columns, gas_desc, play, plev, &
+                          xh2o, .false., cia_ppmv)
+  if (error_msg .ne. "") then
+    return
+  endif
+  deallocate(xh2o)
 
-  !Copy optical depths into input structure.
+  call catch_error(spectral_grid_properties(this%spectral_grid, w0=w0, n=num_wavenumbers, &
+                                            dw=dw))
+  allocate(tau(num_wavenumbers, num_layers))
   do i = 1, num_columns
-    call catch_error(optical_properties(optics(i), tau))
+    call catch_error(create_optics(optics, num_layers, this%spectral_grid, this%device))
+    !Calculate the optical depth.
+    call compute_spectra(this, plev(i,:), tlev(i,:), ppmv(:,i,:), &
+                         cfc_ppmv(:,i,:), cia_ppmv(:,i,:), .false., optics)
+
+    !Copy optical depths into input structure.
+    call catch_error(optical_properties(optics, tau))
     do j = 1, num_layers
       optical_props%tau(i,j,:) = tau(:,j)
     enddo
+    call catch_error(destroy_optics(optics))
   enddo
+  deallocate(tau)
+  deallocate(ppmv)
+  deallocate(cfc_ppmv)
+  deallocate(cia_ppmv)
 
   !Calculate Planck functions.
   do i = 1, num_wavenumbers
@@ -767,13 +766,6 @@ function gas_optics_int(this, play, plev, tlay, tsfc, gas_desc, optical_props, s
       sources%sfc_source(j,i) = planck(tsfc(j), w)*dw
     enddo
   enddo
-
-  !Clean up.
-  do i = 1, num_columns
-    call catch_error(destroy_optics(optics(i)))
-  enddo
-  deallocate(optics)
-  deallocate(tau)
 end function gas_optics_int
 
 

@@ -636,7 +636,6 @@ function gas_optics_ext(this, play, plev, tlay, gas_desc, optical_props, toa_src
   allocate(tau(num_wavenumbers, num_layers))
   allocate(omega(num_wavenumbers, num_layers))
   allocate(g(num_wavenumbers, num_layers))
-  allocate(flux(num_wavenumbers))
   do i = 1, num_columns
     call catch_error(create_optics(optics, num_layers, this%spectral_grid, this%device))
     call compute_spectra(this, plev(i,:), tlev(i,:), ppmv(:,i,:), &
@@ -658,13 +657,14 @@ function gas_optics_ext(this, play, plev, tlay, gas_desc, optical_props, toa_src
   deallocate(tau)
   deallocate(omega)
   deallocate(g)
-  deallocate(flux)
 
   !Copy the incident solar flux.
+  allocate(flux(num_wavenumbers))
   call catch_error(solar_flux_properties(this%solar_flux, flux))
   do i = 1, num_columns
     toa_src(i,:) = flux(:)
   enddo
+  deallocate(flux)
 end function gas_optics_ext
 
 

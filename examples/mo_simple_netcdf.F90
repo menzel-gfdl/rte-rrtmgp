@@ -5,7 +5,8 @@ module mo_simple_netcdf
   private
 
   interface read_field
-    module procedure read_scalar, read_1d_field, read_2d_field, read_3d_field, read_4d_field
+    module procedure read_scalar, read_1d_field, read_2d_field, read_3d_field, read_4d_field, &
+                    read_1d_fieldi, read_3d_fieldi
   end interface
   interface write_field
     module procedure write_1d_int_field, write_2d_int_field, &
@@ -17,79 +18,101 @@ module mo_simple_netcdf
             read_field, read_string, read_char_vec, read_logical_vec, write_field
 contains
   !--------------------------------------------------------------------------------------------------------------------
-  function read_scalar(ncid, varName)
+  subroutine read_scalar(buf, ncid, varName)
+    real(wp), intent(inout) :: buf
     integer,          intent(in) :: ncid
     character(len=*), intent(in) :: varName
-    real(wp)                     :: read_scalar
 
     integer :: varid
 
     if(nf90_inq_varid(ncid, trim(varName), varid) /= NF90_NOERR) &
       call stop_on_err("read_field: can't find variable " // trim(varName))
-    if(nf90_get_var(ncid, varid, read_scalar)  /= NF90_NOERR) &
+    if(nf90_get_var(ncid, varid, buf)  /= NF90_NOERR) &
       call stop_on_err("read_field: can't read variable " // trim(varName))
 
-  end function read_scalar
+  end subroutine read_scalar
   !--------------------------------------------------------------------------------------------------------------------
-  function read_1d_field(ncid, varName, nx)
+  subroutine read_1d_field(buf, ncid, varName)
+    real(wp), dimension(:), intent(inout) :: buf
     integer,          intent(in) :: ncid
     character(len=*), intent(in) :: varName
-    integer,          intent(in) :: nx
-    real(wp), dimension(nx)      :: read_1d_field
 
     integer :: varid
 
     if(nf90_inq_varid(ncid, trim(varName), varid) /= NF90_NOERR) &
       call stop_on_err("read_field: can't find variable " // trim(varName))
-    if(nf90_get_var(ncid, varid, read_1d_field)  /= NF90_NOERR) &
+    if(nf90_get_var(ncid, varid, buf)  /= NF90_NOERR) &
       call stop_on_err("read_field: can't read variable " // trim(varName))
 
-  end function read_1d_field
+  end subroutine read_1d_field
+  subroutine read_1d_fieldi(buf, ncid, varName)
+    integer, dimension(:), intent(inout) :: buf
+    integer,          intent(in) :: ncid
+    character(len=*), intent(in) :: varName
+
+    integer :: varid
+
+    if(nf90_inq_varid(ncid, trim(varName), varid) /= NF90_NOERR) &
+      call stop_on_err("read_field: can't find variable " // trim(varName))
+    if(nf90_get_var(ncid, varid, buf)  /= NF90_NOERR) &
+      call stop_on_err("read_field: can't read variable " // trim(varName))
+
+  end subroutine read_1d_fieldi
   !--------------------------------------------------------------------------------------------------------------------
-  function read_2d_field(ncid, varName, nx, ny)
+  subroutine read_2d_field(buf, ncid, varName)
+    real(wp), dimension(:,:), intent(inout) :: buf
     integer,          intent(in) :: ncid
     character(len=*), intent(in) :: varName
-    integer,          intent(in) :: nx, ny
-    real(wp), dimension(nx, ny)  :: read_2d_field
 
     integer :: varid
 
     if(nf90_inq_varid(ncid, trim(varName), varid) /= NF90_NOERR) &
       call stop_on_err("read_field: can't find variable " // trim(varName))
-    if(nf90_get_var(ncid, varid, read_2d_field)  /= NF90_NOERR) &
+    if(nf90_get_var(ncid, varid, buf)  /= NF90_NOERR) &
       call stop_on_err("read_field: can't read variable " // trim(varName))
 
-  end function read_2d_field
+  end subroutine read_2d_field
   !--------------------------------------------------------------------------------------------------------------------
-  function read_3d_field(ncid, varName, nx, ny, nz)
+  subroutine read_3d_field(buf, ncid, varName)
+    real(wp), dimension(:,:,:), intent(inout) :: buf
     integer,          intent(in) :: ncid
     character(len=*), intent(in) :: varName
-    integer,          intent(in) :: nx, ny, nz
-    real(wp), dimension(nx, ny, nz)  :: read_3d_field
 
     integer :: varid
 
     if(nf90_inq_varid(ncid, trim(varName), varid) /= NF90_NOERR) &
       call stop_on_err("read_field: can't find variable " // trim(varName))
-    if(nf90_get_var(ncid, varid, read_3d_field)  /= NF90_NOERR) &
+    if(nf90_get_var(ncid, varid, buf)  /= NF90_NOERR) &
       call stop_on_err("read_field: can't read variable " // trim(varName))
 
-  end function read_3d_field
+  end subroutine read_3d_field
+  subroutine read_3d_fieldi(buf, ncid, varName)
+    integer, dimension(:,:,:), intent(inout) :: buf
+    integer,          intent(in) :: ncid
+    character(len=*), intent(in) :: varName
+
+    integer :: varid
+
+    if(nf90_inq_varid(ncid, trim(varName), varid) /= NF90_NOERR) &
+      call stop_on_err("read_field: can't find variable " // trim(varName))
+    if(nf90_get_var(ncid, varid, buf)  /= NF90_NOERR) &
+      call stop_on_err("read_field: can't read variable " // trim(varName))
+
+  end subroutine read_3d_fieldi
   !--------------------------------------------------------------------------------------------------------------------
-  function read_4d_field(ncid, varName, nw, nx, ny, nz)
+  subroutine read_4d_field(buf, ncid, varName)
+    real(wp), dimension(:,:,:,:), intent(inout) :: buf
     integer,          intent(in) :: ncid
     character(len=*), intent(in) :: varName
-    integer,          intent(in) :: nw, nx, ny, nz
-    real(wp), dimension(nw, nx, ny, nz)  :: read_4d_field
 
     integer :: varid
 
     if(nf90_inq_varid(ncid, trim(varName), varid) /= NF90_NOERR) &
       call stop_on_err("read_field: can't find variable " // trim(varName))
-    if(nf90_get_var(ncid, varid, read_4d_field)  /= NF90_NOERR) &
+    if(nf90_get_var(ncid, varid, buf)  /= NF90_NOERR) &
       call stop_on_err("read_field: can't read variable " // trim(varName))
 
-  end function read_4d_field
+  end subroutine read_4d_field
   !--------------------------------------------------------------------------------------------------------------------
   function read_string(ncid, varName, nc)
     integer,          intent(in) :: ncid
@@ -235,44 +258,44 @@ contains
 
   end function write_string
   !--------------------------------------------------------------------------------------------------------------------
-  function read_logical_vec(ncid, varName, nx)
+  subroutine read_logical_vec(buf, ncid, varName)
+    logical, dimension(:), intent(inout) :: buf
     integer,          intent(in) :: ncid
     character(len=*), intent(in) :: varName
-    integer,          intent(in) :: nx
-    integer,      dimension(nx) :: read_logical_tmp
-    logical(wl),  dimension(nx) :: read_logical_vec
 
+    integer, dimension(:), allocatable :: read_logical_tmp
     integer :: varid
     integer :: ix
 
+    allocate(read_logical_tmp(size(buf)))
     if(nf90_inq_varid(ncid, trim(varName), varid) /= NF90_NOERR) &
       call stop_on_err("read_logical_vec: can't find variable " // trim(varName))
     if(nf90_get_var(ncid, varid, read_logical_tmp)  /= NF90_NOERR) &
       call stop_on_err("read_logical_vec: can't read variable " // trim(varName))
-    do ix = 1, nx
+    do ix = 1, size(buf)
       if (read_logical_tmp(ix) .eq. 0) then
-        read_logical_vec(ix) = .false.
+        buf(ix) = .false.
       else
-        read_logical_vec(ix) = .true.
+        buf(ix) = .true.
       endif
     enddo
+    deallocate(read_logical_tmp)
 
-  end function read_logical_vec
+  end subroutine read_logical_vec
   !--------------------------------------------------------------------------------------------------------------------
-  function read_char_vec(ncid, varName, nx)
+  subroutine read_char_vec(buf, ncid, varName)
+    character(len=32), dimension(:), intent(inout) :: buf
     integer,          intent(in) :: ncid
     character(len=*), intent(in) :: varName
-    integer,          intent(in) :: nx
-    character(len=32), dimension(nx) :: read_char_vec
 
     integer :: varid
 
     if(nf90_inq_varid(ncid, trim(varName), varid) /= NF90_NOERR) &
       call stop_on_err("read_char_vec: can't find variable " // trim(varName))
-    if(nf90_get_var(ncid, varid, read_char_vec)  /= NF90_NOERR) &
+    if(nf90_get_var(ncid, varid, buf)  /= NF90_NOERR) &
       call stop_on_err("read_char_vec: can't read variable " // trim(varName))
 
-  end function read_char_vec
+  end subroutine read_char_vec
   !--------------------------------------------------------------------------------------------------------------------
   function dim_exists(ncid, dimName)
     !

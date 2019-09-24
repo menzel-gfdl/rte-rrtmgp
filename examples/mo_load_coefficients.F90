@@ -93,6 +93,9 @@ contains
                ncontributors_lower, &
                ncontributors_upper, &
                ninternalSourcetemps
+    real(wp), dimension(:,:), allocatable :: buffer
+    integer :: i
+    integer :: j
     ! --------------------------------------------------
     !
     ! How big are the various arrays?
@@ -121,50 +124,84 @@ contains
     !
     ! Read the many arrays
     !
-    gas_names         = read_char_vec(ncid, 'gas_names', nabsorbers)
-    key_species       = read_field(ncid, 'key_species',  2, nlayers, nbnds)
-    band_lims         = read_field(ncid, 'bnd_limits_wavenumber', 2, nbnds)
-    band2gpt          = int(read_field(ncid, 'bnd_limits_gpt', 2, nbnds))
-    press_ref         = read_field(ncid, 'press_ref', npress)
-    temp_ref          = read_field(ncid, 'temp_ref',  ntemps)
-    temp_ref_p        = read_field(ncid, 'absorption_coefficient_ref_P')
-    temp_ref_t        = read_field(ncid, 'absorption_coefficient_ref_T')
-    press_ref_trop    = read_field(ncid, 'press_ref_trop')
-    kminor_lower      = read_field(ncid, 'kminor_lower', &
-        ncontributors_lower, nmixingfracs, ntemps)
-    kminor_upper      = read_field(ncid, 'kminor_upper', &
-        ncontributors_upper, nmixingfracs, ntemps)
-    gas_minor = read_char_vec(ncid, 'gas_minor', nminorabsorbers)
-    identifier_minor = read_char_vec(ncid, 'identifier_minor', nminorabsorbers)
-    minor_gases_lower = read_char_vec(ncid, 'minor_gases_lower', nminor_absorber_intervals_lower)
-    minor_gases_upper = read_char_vec(ncid, 'minor_gases_upper', nminor_absorber_intervals_upper)
-    minor_limits_gpt_lower &
-                      = int(read_field(ncid, 'minor_limits_gpt_lower', npairs,nminor_absorber_intervals_lower))
-    minor_limits_gpt_upper &
-                      = int(read_field(ncid, 'minor_limits_gpt_upper', npairs,nminor_absorber_intervals_upper))
-    minor_scales_with_density_lower &
-                      = read_logical_vec(ncid, 'minor_scales_with_density_lower', nminor_absorber_intervals_lower)
-    minor_scales_with_density_upper &
-                      = read_logical_vec(ncid, 'minor_scales_with_density_upper', nminor_absorber_intervals_upper)
-    scale_by_complement_lower &
-                      = read_logical_vec(ncid, 'scale_by_complement_lower', nminor_absorber_intervals_lower)
-    scale_by_complement_upper &
-                      = read_logical_vec(ncid, 'scale_by_complement_upper', nminor_absorber_intervals_upper)
-    scaling_gas_lower &
-                      = read_char_vec(ncid, 'scaling_gas_lower', nminor_absorber_intervals_lower)
-    scaling_gas_upper &
-                      = read_char_vec(ncid, 'scaling_gas_upper', nminor_absorber_intervals_upper)
-    kminor_start_lower &
-                      = read_field(ncid, 'kminor_start_lower', nminor_absorber_intervals_lower)
-    kminor_start_upper &
-                      = read_field(ncid, 'kminor_start_upper', nminor_absorber_intervals_upper)
-    vmr_ref           = read_field(ncid, 'vmr_ref', nlayers, nextabsorbers, ntemps)
-
-    kmajor            = read_field(ncid, 'kmajor',  ngpts, nmixingfracs,  npress+1, ntemps)
-    if(var_exists(ncid, 'rayl_lower')) then
-      rayl_lower = read_field(ncid, 'rayl_lower',   ngpts, nmixingfracs,            ntemps)
-      rayl_upper = read_field(ncid, 'rayl_upper',   ngpts, nmixingfracs,            ntemps)
-    end if
+    allocate(gas_names(nabsorbers))
+    call read_char_vec(gas_names, ncid, 'gas_names')
+    allocate(key_species(2, nlayers, nbnds))
+    call read_field(key_species, ncid, 'key_species')
+    allocate(band_lims(2, nbnds))
+    call read_field(band_lims, ncid, 'bnd_limits_wavenumber')
+    allocate(band2gpt(2, nbnds))
+    allocate(buffer(2, nbnds))
+    call read_field(buffer, ncid, 'bnd_limits_gpt')
+    do j = 1, nbnds
+      do i = 1, 2
+        band2gpt(i,j) = int(buffer(i,j))
+      enddo
+   enddo
+   deallocate(buffer)
+   allocate(press_ref(npress))
+   call read_field(press_ref, ncid, 'press_ref')
+   allocate(temp_ref(ntemps))
+   call read_field(temp_ref, ncid, 'temp_ref')
+   call read_field(temp_ref_p, ncid, 'absorption_coefficient_ref_P')
+   call read_field(temp_ref_t, ncid, 'absorption_coefficient_ref_T')
+   call read_field(press_ref_trop, ncid, 'press_ref_trop')
+   allocate(kminor_lower(ncontributors_lower, nmixingfracs, ntemps))
+   call read_field(kminor_lower, ncid, 'kminor_lower')
+   allocate(kminor_upper(ncontributors_upper, nmixingfracs, ntemps))
+   call read_field(kminor_upper, ncid, 'kminor_upper')
+   allocate(gas_minor(nminorabsorbers))
+   call read_char_vec(gas_minor, ncid, 'gas_minor')
+   allocate(identifier_minor(nminorabsorbers))
+   call read_char_vec(identifier_minor, ncid, 'identifier_minor')
+   allocate(minor_gases_lower(nminor_absorber_intervals_lower))
+   call read_char_vec(minor_gases_lower, ncid, 'minor_gases_lower')
+   allocate(minor_gases_upper(nminor_absorber_intervals_upper))
+   call read_char_vec(minor_gases_upper, ncid, 'minor_gases_upper')
+   allocate(minor_limits_gpt_lower(npairs,nminor_absorber_intervals_lower))
+   allocate(buffer(npairs,nminor_absorber_intervals_lower))
+   call read_field(buffer, ncid, 'minor_limits_gpt_lower')
+   do j = 1, nminor_absorber_intervals_lower
+     do i = 1, npairs
+       minor_limits_gpt_lower(i,j) = int(buffer(i,j))
+     enddo
+   enddo
+   deallocate(buffer)
+   allocate(minor_limits_gpt_upper(npairs,nminor_absorber_intervals_upper))
+   allocate(buffer(npairs,nminor_absorber_intervals_upper))
+   call read_field(buffer, ncid, 'minor_limits_gpt_upper')
+   do j = 1, nminor_absorber_intervals_upper
+     do i = 1, npairs
+       minor_limits_gpt_upper(i,j) = int(buffer(i,j))
+     enddo
+   enddo
+   deallocate(buffer)
+   allocate(minor_scales_with_density_lower(nminor_absorber_intervals_lower))
+   call read_logical_vec(minor_scales_with_density_lower, ncid, 'minor_scales_with_density_lower')
+   allocate(minor_scales_with_density_upper(nminor_absorber_intervals_upper))
+   call read_logical_vec(minor_scales_with_density_upper, ncid, 'minor_scales_with_density_upper')
+   allocate(scale_by_complement_lower(nminor_absorber_intervals_lower))
+   call read_logical_vec(scale_by_complement_lower, ncid, 'scale_by_complement_lower')
+   allocate(scale_by_complement_upper(nminor_absorber_intervals_upper))
+   call read_logical_vec(scale_by_complement_upper, ncid, 'scale_by_complement_upper')
+   allocate(scaling_gas_lower(nminor_absorber_intervals_lower))
+   call read_char_vec(scaling_gas_lower, ncid, 'scaling_gas_lower')
+   allocate(scaling_gas_upper(nminor_absorber_intervals_upper))
+   call read_char_vec(scaling_gas_upper, ncid, 'scaling_gas_upper')
+   allocate(kminor_start_lower(nminor_absorber_intervals_lower))
+   call read_field(kminor_start_lower, ncid, 'kminor_start_lower')
+   allocate(kminor_start_upper(nminor_absorber_intervals_upper))
+   call read_field(kminor_start_upper, ncid, 'kminor_start_upper')
+   allocate(vmr_ref(nlayers,nextabsorbers,ntemps))
+   call read_field(vmr_ref, ncid, 'vmr_ref')
+   allocate(kmajor(ngpts,nmixingfracs,npress+1,ntemps))
+   call read_field(kmajor, ncid, 'kmajor')
+   if (var_exists(ncid, 'rayl_lower')) then
+     allocate(rayl_lower(ngpts,nmixingfracs,ntemps))
+     call read_field(rayl_lower, ncid, 'rayl_lower')
+     allocate(rayl_upper(ngpts,nmixingfracs,ntemps))
+     call read_field(rayl_upper, ncid, 'rayl_upper')
+   endif
     ! --------------------------------------------------
     !
     ! Initialize the gas optics class with data. The calls look slightly different depending
@@ -175,8 +212,10 @@ contains
       !
       ! If there's a totplnk variable in the file it's a longwave (internal sources) type
       !
-      totplnk     = read_field(ncid, 'totplnk', ninternalSourcetemps, nbnds)
-      planck_frac = read_field(ncid, 'plank_fraction', ngpts, nmixingfracs, npress+1, ntemps)
+      allocate(totplnk(ninternalSourcetemps,nbnds))
+      call read_field(totplnk, ncid, 'totplnk')
+      allocate(planck_frac(ngpts,nmixingfracs,npress+1,ntemps))
+      call read_field(planck_frac, ncid, 'plank_fraction')
       call stop_on_err(kdist%load(available_gases, &
                                   gas_names,   &
                                   key_species, &
@@ -201,11 +240,14 @@ contains
                                   kminor_start_upper, &
                                   totplnk, planck_frac,       &
                                   rayl_lower, rayl_upper))
+      deallocate(totplnk)
+      deallocate(planck_frac)
     else
       !
       ! Solar source doesn't have an dependencies yet
       !
-      solar_src = read_field(ncid, 'solar_source', ngpts)
+      allocate(solar_src(ngpts))
+      call read_field(solar_src, ncid, 'solar_source')
       call stop_on_err(kdist%load(available_gases, &
                                   gas_names,   &
                                   key_species, &
@@ -230,8 +272,27 @@ contains
                                   kminor_start_upper, &
                                   solar_src, &
                                   rayl_lower, rayl_upper))
+      deallocate(solar_src)
     end if
     ! --------------------------------------------------
     ncid = nf90_close(ncid)
+    if (allocated(rayl_lower)) deallocate(rayl_lower)
+    if (allocated(rayl_upper)) deallocate(rayl_upper)
+    deallocate(gas_names)
+    deallocate(key_species)
+    deallocate(band2gpt)
+    deallocate(band_lims)
+    deallocate(press_ref)
+    deallocate(temp_ref)
+    deallocate(vmr_ref)
+    deallocate(kmajor)
+    deallocate(gas_minor, identifier_minor)
+    deallocate(minor_gases_lower, minor_gases_upper)
+    deallocate(minor_limits_gpt_lower, minor_limits_gpt_upper)
+    deallocate(minor_scales_with_density_lower, minor_scales_with_density_upper)
+    deallocate(scaling_gas_lower, scaling_gas_upper)
+    deallocate(scale_by_complement_lower, scale_by_complement_upper)
+    deallocate(kminor_start_lower, kminor_start_upper)
+    deallocate(kminor_lower, kminor_upper)
   end subroutine load_and_init
 end module

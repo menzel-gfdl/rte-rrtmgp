@@ -747,7 +747,9 @@ contains
                                   rayl_lower, rayl_upper)
     ! Planck function tables
     !
+    allocate(this%totplnk(size(totplnk,1), size(totplnk,2)))
     this%totplnk = totplnk
+    allocate(this%planck_frac(size(planck_frac,1), size(planck_frac,2), size(planck_frac,3), size(planck_frac,4)))
     this%planck_frac = planck_frac
     ! Temperature steps for Planck function interpolation
     !   Assumes that temperature minimum and max are the same for the absorption coefficient grid and the
@@ -838,6 +840,7 @@ contains
     !
     ! Solar source table init
     !
+    allocate(this%solar_src(size(solar_src)))
     this%solar_src = solar_src
 
   end function load_ext
@@ -927,11 +930,18 @@ contains
     !   by the host model
     !
     ngas = count(gas_is_present)
+    allocate(this%gas_names(ngas))
     !
     ! Initialize the gas optics object, keeping only those gases known to the
     !   gas optics and also present in the host model
     !
-    this%gas_names = pack(gas_names,mask=gas_is_present)
+    j = 0
+    do i = 1, size(gas_is_present)
+      if (gas_is_present(i)) then
+        j = j + 1
+        this%gas_names(j) = trim(gas_names(i))
+      endif
+    enddo
 
     allocate(vmr_ref_red(size(vmr_ref,dim=1),0:ngas, &
                          size(vmr_ref,dim=3)))
@@ -982,8 +992,11 @@ contains
                              this%kminor_start_upper)
 
     ! Arrays not reduced by the presence, or lack thereof, of a gas
+    allocate(this%press_ref(size(press_ref)))
     this%press_ref = press_ref
+    allocate(this%temp_ref(size(temp_ref)))
     this%temp_ref  = temp_ref
+    allocate(this%kmajor(size(kmajor,1), size(kmajor,2), size(kmajor,3), size(kmajor,4)))
     this%kmajor    = kmajor
 
     if(allocated(rayl_lower) .neqv. allocated(rayl_upper)) then
@@ -1453,21 +1466,34 @@ contains
     red_nm = count(gas_is_present)
 
     if ((red_nm .eq. nm)) then
+      allocate(kminor_atm_red(size(kminor_atm,1), size(kminor_atm,2), size(kminor_atm,3)))
       kminor_atm_red = kminor_atm
+      allocate(minor_gases_atm_red(size(minor_gases_atm)))
       minor_gases_atm_red = minor_gases_atm
+      allocate(minor_limits_gpt_atm_red(size(minor_limits_gpt_atm,1), size(minor_limits_gpt_atm,2)))
       minor_limits_gpt_atm_red = minor_limits_gpt_atm
+      allocate(minor_scales_with_density_atm_red(size(minor_scales_with_density_atm)))
       minor_scales_with_density_atm_red = minor_scales_with_density_atm
+      allocate(scaling_gas_atm_red(size(scaling_gas_atm)))
       scaling_gas_atm_red = scaling_gas_atm
+      allocate(scale_by_complement_atm_red(size(scale_by_complement_atm)))
       scale_by_complement_atm_red = scale_by_complement_atm
+      allocate(kminor_start_atm_red(size(kminor_start_atm)))
       kminor_start_atm_red = kminor_start_atm
     else
-      minor_gases_atm_red= pack(minor_gases_atm, mask=gas_is_present)
+      i = count(gas_is_present)
+      allocate(minor_gases_atm_red(i))
+      minor_gases_atm_red = pack(minor_gases_atm, mask=gas_is_present)
+      allocate(minor_scales_with_density_atm_red(i))
       minor_scales_with_density_atm_red = pack(minor_scales_with_density_atm, &
         mask=gas_is_present)
+      allocate(scaling_gas_atm_red(i))
       scaling_gas_atm_red = pack(scaling_gas_atm, &
         mask=gas_is_present)
+      allocate(scale_by_complement_atm_red(i))
       scale_by_complement_atm_red = pack(scale_by_complement_atm, &
         mask=gas_is_present)
+      allocate(kminor_start_atm_red(i))
       kminor_start_atm_red = pack(kminor_start_atm, &
         mask=gas_is_present)
 

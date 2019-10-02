@@ -1,6 +1,6 @@
 program stratospheric_adjustments
 
-use, intrinsic :: iso_fortran_env, only: error_unit, output_unit, real32
+use, intrinsic :: iso_fortran_env, only: error_unit, output_unit
 use netcdf
 
 use mo_fluxes, only: ty_fluxes_broadband
@@ -15,13 +15,14 @@ use mo_rte_sw, only: rte_sw
 use mo_source_functions, only: ty_source_func_lw
 use mo_load_coefficients, only: load_and_init
 
+use argparse
+use mo_gas_optics, only: ty_gas_optics
+use mo_gas_optics_gfdl_grtcode, only: ty_gas_optics_gfdl_grtcode
+use rs_utils, only: rs_set_verbosity
 implicit none
 
-
+integer, parameter :: real32 = 4
 character(len=132) :: rfmip_file
-character(len=64) :: name_of_program
-character(len=64) :: buffer
-integer :: nargs
 integer :: ncol
 integer :: nlay
 integer :: nexp
@@ -31,8 +32,6 @@ integer :: n_quad_angles
 logical :: top_at_1
 integer :: nbnd
 integer :: ngpt
-character(len=4) :: forcing_index_char
-character(len=4) :: physics_index_char
 real(kind=wp), dimension(:,:,:), allocatable :: p_lay !Atmospheric layer pressure [Pa] (ncol, nlay, nexp).
 real(kind=wp), dimension(:,:,:), allocatable :: p_lev !Atmospheric level pressure [Pa] (ncol, nlev, nexp).
 real(kind=wp), dimension(:,:,:), allocatable :: t_lay !Atmospheric layer temperature [K] (ncol, nlay, nexp).
@@ -49,28 +48,24 @@ real(kind=wp), dimension(:,:), allocatable :: toa_flux !Shortwave flux at top-of
 real(kind=wp), dimension(:), allocatable :: def_tsi !(ncol)
 real(kind=wp), dimension(:), allocatable :: mu0 !Cosine of solar zenith angle (ncol).
 logical, dimension(:,:), allocatable :: usecol !Is column daytime? (ncol, nexp).
-
 character(len=132) :: lw_kdist_file !K-distribution configuration for the longwave.
 character(len=32), dimension(:), allocatable :: lw_kdist_gas_names !Gas names used in the model.
 character(len=32), dimension(:), allocatable :: lw_rfmip_gas_games !Gas names used in the input atmosphere file.
 real(kind=wp), dimension(:,:,:), allocatable, target :: lw_flux_up !Upwelling longwave flux [W/m^2] (ncol, nlev, nexp).
 real(kind=wp), dimension(:,:,:), allocatable, target :: lw_flux_dn !Downwelling longwave flux [W/m^2] (ncol, nlev, nexp).
-type(ty_gas_optics_rrtmgp) :: lw_k_dist !Longwave k-distribution object.
+type(ty_gas_optics_rrtmgp), target :: lw_k_dist !Longwave k-distribution object.
 type(ty_optical_props_1scl) :: lw_optical_props !Longwave optics object.
 type(ty_fluxes_broadband) :: lw_fluxes !Longwave fluxes object.
 type(ty_gas_concs), dimension(:), allocatable :: lw_gas_conc_array !Longwave gas concentrations object.
-
 character(len=132) :: sw_kdist_file !K-distribution configuration for the shortwave.
 character(len=32), dimension(:), allocatable :: sw_kdist_gas_names !Gas names used in the model.
 character(len=32), dimension(:), allocatable :: sw_rfmip_gas_games !Gas names used in the input atmosphere file.
 real(kind=wp), dimension(:,:,:), allocatable, target :: sw_flux_up !Upwelling shortwave flux [W/m^2] (ncol, nlev, nexp).
 real(kind=wp), dimension(:,:,:), allocatable, target :: sw_flux_dn !Downwelling shortwave flux [W/m^2] (ncol, nlev, nexp).
-type(ty_gas_optics_rrtmgp) :: sw_k_dist !Shortwave k-distribution object.
+type(ty_gas_optics_rrtmgp), target :: sw_k_dist !Shortwave k-distribution object.
 type(ty_optical_props_2str) :: sw_optical_props !Shortwave optics object.
 type(ty_fluxes_broadband) :: sw_fluxes !Shortwave fluxes object.
 type(ty_gas_concs), dimension(:), allocatable :: sw_gas_conc_array !Shortwave gas concentrations object.
-
-
 real(kind=wp), parameter :: stratosphere_max_pressure = 20000._wp !Bottom of the stratosphere [Pa].
 integer, dimension(:,:), allocatable :: stratosphere_starting_index !Index corresponding to the top, bottom of
                                                                     !the stratosphere if the column is oriented
@@ -94,39 +89,49 @@ integer :: j
 integer :: k
 
 
+type(Parser_t) :: parser
+type(ty_gas_optics_gfdl_grtcode), target :: lw_lbl
+type(ty_gas_optics_gfdl_grtcode), target :: sw_lbl
+class(ty_gas_optics), pointer :: lw_optics => null()
+class(ty_gas_optics), pointer :: sw_optics => null()
+character(len=512) :: buffer
+character(len=16) :: model
+character(len=16), parameter :: rrtmgp = "RRTMGP"
+character(len=16), parameter :: grtcode = "GFDL-GRTCODE"
+
+
 !Parse command line arguments.
-call get_command_argument(0, name_of_program)
-nargs = command_argument_count()
-do i = 1, nargs
-  call get_command_argument(i, buffer)
-  if (trim(buffer) .eq. "-h" .or. trim(buffer) .eq. "--help") then
-    write(output_unit, "(a)") "Usage: "//trim(name_of_program)//" [rfmip_file]" &
-         //" [lw k-distribution_file] [sw k-distribution_file]" &
-         //" [forcing_index (1,2,3)] [physics_index (1,2)]"
-    stop
-  endif
-enddo
-
-rfmip_file = "multiple_input4MIPs_radiation_RFMIP_UColorado-RFMIP-1-2_none.nc"
-if (nargs .ge. 1) call get_command_argument(1, rfmip_file)
+parser = create_parser()
+call add_argument(parser, "-l", "Longwave k-distribution file.", &
+                  requires_val=.true., long_name="--lw-k-dist")
+call add_argument(parser, "-m", "Model ("//trim(rrtmgp)//" or "//trim(grtcode)//").", &
+                  requires_val=.true., long_name="--model")
+call add_argument(parser, "-n", "GRTCODE namelist file.", &
+                  requires_val=.true., long_name="--namelist")
+call add_argument(parser, "-r", "RFMIP file.", requires_val=.true., &
+                  long_name="--rfmip-file")
+call add_argument(parser, "-s", "Shortwave k-distribution file.", &
+                  requires_val=.true., long_name="--sw-k-dist")
+call parse_args(parser)
+call get_argument(parser, "-r", buffer)
+if (trim(buffer) .eq. "not present") then
+  rfmip_file = "multiple_input4MIPs_radiation_RFMIP_UColorado-RFMIP-1-2_none.nc"
+else
+  rfmip_file = trim(buffer)
+endif
 call read_size(rfmip_file, ncol, nlay, nexp)
-
-forcing_index_char = "1"
-if (nargs .ge. 4) call get_command_argument(4, forcing_index_char)
-read(forcing_index_char, '(i4)') forcing_index
-if (forcing_index .lt. 1 .or. forcing_index .gt. 3) then
-  call stop_on_err("Forcing index is invalid (must be 1,2 or 3).")
+call get_argument(parser, "-m", buffer)
+if (trim(buffer) .eq. "not present") then
+  model = trim(rrtmgp)
+else
+  model = trim(buffer)
 endif
-
-physics_index_char = "1"
+if (trim(model) .ne. trim(rrtmgp) .and. trim(model) .ne. trim(grtcode)) then
+  call stop_on_err("Invalid model.  Use --help option.")
+endif
+forcing_index = 1
+physics_index = 1
 n_quad_angles = 1
-if (nargs .ge. 5) call get_command_argument(5, physics_index_char)
-read(physics_index_char, "(i4)") physics_index
-if (physics_index .lt. 1 .or. physics_index .gt. 2) then
-  call stop_on_err("Physics index is invalid (must be 1 or 2).")
-endif
-if (physics_index .eq. 2) n_quad_angles = 3
-
 
 !Read input atmospheric data.
 call read_and_block_pt(rfmip_file, ncol, p_lay, p_lev, t_lay, t_lev)
@@ -134,7 +139,6 @@ top_at_1 = p_lay(1,1,1) .lt. p_lay(1,nlay,1)
 call read_and_block_lw_bc(rfmip_file, ncol, sfc_emis, sfc_t)
 call read_and_block_sw_bc(rfmip_file, ncol, surface_albedo, &
                           total_solar_irradiance, solar_zenith_angle)
-
 
 !Find pressure layer indices for the stratosphere.
 allocate(stratosphere_starting_index(ncol, nexp))
@@ -164,71 +168,100 @@ do k = 1, nexp
   enddo
 enddo
 
-
 !Initialize longwave.
-lw_kdist_file = "coefficients_lw.nc"
-if (nargs .ge. 2) call get_command_argument(2, lw_kdist_file)
+call get_argument(parser, "-l", buffer)
+if (trim(buffer) .eq. "not present") then
+  lw_kdist_file = "coefficients_lw.nc"
+else
+  lw_kdist_file = trim(buffer)
+endif
 call determine_gas_names(rfmip_file, lw_kdist_file, forcing_index, &
                          lw_kdist_gas_names, lw_rfmip_gas_games)
-print *, "Lw calculation uses RFMIP gases: ", &
-         (trim(lw_rfmip_gas_games(b))//" ", b = 1, size(lw_rfmip_gas_games))
 call read_and_block_gases_ty(rfmip_file, ncol, lw_kdist_gas_names, &
                              lw_rfmip_gas_games, lw_gas_conc_array)
-call load_and_init(lw_k_dist, trim(lw_kdist_file), lw_gas_conc_array(1))
-if (.not. lw_k_dist%source_is_internal()) then
-  call stop_on_err("k-distribution file isn't LW.")
-endif
-if (top_at_1) then
-  p_lev(:,1,:) = lw_k_dist%get_press_min() + epsilon(lw_k_dist%get_press_min())
+write(output_unit, *) "Lw calculation uses RFMIP gases: ", &
+                      (trim(lw_rfmip_gas_games(b))//" ", &
+                       b=1, size(lw_rfmip_gas_games))
+if (trim(model) .eq. trim(rrtmgp)) then
+  call load_and_init(lw_k_dist, trim(lw_kdist_file), lw_gas_conc_array(1))
+  if (.not. lw_k_dist%source_is_internal()) then
+    call stop_on_err("k-distribution file isn't LW.")
+  endif
+  if (top_at_1) then
+    p_lev(:,1,:) = lw_k_dist%get_press_min() + epsilon(lw_k_dist%get_press_min())
+  else
+    p_lev(:,nlay+1,:) = lw_k_dist%get_press_min() + epsilon(lw_k_dist%get_press_min())
+  endif
+  lw_optics => lw_k_dist
 else
-  p_lev(:,nlay+1,:) = lw_k_dist%get_press_min() + epsilon(lw_k_dist%get_press_min())
+  call get_argument(parser, "-n", buffer)
+  if (trim(buffer) .eq. "not present") then
+    call stop_on_err("namelist required for GFDL-GRTCODE.")
+  endif
+  call rs_set_verbosity(3)
+  call stop_on_err(lw_lbl%initialize(buffer, nlay+1, lw_gas_conc_array(1)%gas_name))
+  lw_optics => lw_lbl
 endif
 allocate(lw_flux_up(ncol, nlay+1, nexp))
 allocate(lw_flux_dn(ncol, nlay+1, nexp))
-call stop_on_err(source%alloc(ncol, nlay, lw_k_dist))
-call stop_on_err(lw_optical_props%alloc_1scl(ncol, nlay, lw_k_dist))
-nbnd = lw_k_dist%get_nband()
+call stop_on_err(source%alloc(ncol, nlay, lw_optics))
+call stop_on_err(lw_optical_props%alloc_1scl(ncol, nlay, lw_optics))
+nbnd = lw_optics%get_nband()
 allocate(sfc_emis_spec(nbnd, ncol))
 allocate(lw_heating_rate(ncol, nlay, nexp))
 
-
 !Initialize shortwave.
-sw_kdist_file = "coefficients_sw.nc"
-if (nargs .ge. 3) call get_command_argument(3, sw_kdist_file)
+call get_argument(parser, "-s", buffer)
+if (trim(buffer) .eq. "not present") then
+  sw_kdist_file = "coefficients_sw.nc"
+else
+  sw_kdist_file = trim(buffer)
+endif
 call determine_gas_names(rfmip_file, sw_kdist_file, forcing_index, &
                          sw_kdist_gas_names, sw_rfmip_gas_games)
-print *, "Sw calculation uses RFMIP gases: ", &
-         (trim(sw_rfmip_gas_games(b))//" ", b = 1, size(sw_rfmip_gas_games))
+write(output_unit, *) "Sw calculation uses RFMIP gases: ", &
+                      (trim(sw_rfmip_gas_games(b))//" ", &
+                       b=1, size(sw_rfmip_gas_games))
 call read_and_block_gases_ty(rfmip_file, ncol, sw_kdist_gas_names, &
                              sw_rfmip_gas_games, sw_gas_conc_array)
-call load_and_init(sw_k_dist, trim(sw_kdist_file), sw_gas_conc_array(1))
-if (.not. sw_k_dist%source_is_external()) then
-  call stop_on_err("k-distribution file isn't SW.")
-endif
-nbnd = sw_k_dist%get_nband()
-ngpt = sw_k_dist%get_ngpt()
+!if (trim(model) .eq. trim(rrtmgp)) then
+  call load_and_init(sw_k_dist, trim(sw_kdist_file), sw_gas_conc_array(1))
+  if (.not. sw_k_dist%source_is_external()) then
+    call stop_on_err("k-distribution file isn't SW.")
+  endif
+  if (top_at_1) then
+    p_lev(:,1,:) = sw_k_dist%get_press_min() + epsilon(sw_k_dist%get_press_min())
+  else
+    p_lev(:,nlay+1,:) = sw_k_dist%get_press_min() + epsilon(sw_k_dist%get_press_min())
+  endif
+  sw_optics => sw_k_dist
+!else
+!  call get_argument(parser, "-n", buffer)
+!  if (trim(buffer) .eq. "not present") then
+!    call stop_on_err("namelist required for GFDL-GRTCODE.")
+!  endif
+!  call rs_set_verbosity(3)
+!  call stop_on_err(sw_lbl%initialize(buffer, nlay+1, sw_gas_conc_array(1)%gas_name))
+!  sw_optics => sw_lbl
+!endif
+nbnd = sw_optics%get_nband()
+ngpt = sw_optics%get_ngpt()
 allocate(toa_flux(ncol, ngpt))
 allocate(def_tsi(ncol))
 allocate(usecol(ncol, nexp))
-if (top_at_1) then
-  p_lev(:,1,:) = sw_k_dist%get_press_min() + epsilon(sw_k_dist%get_press_min())
-else
-  p_lev(:,nlay+1,:) = sw_k_dist%get_press_min() + epsilon(sw_k_dist%get_press_min())
-endif
 do b = 1, nexp
   usecol(1:ncol,b) = solar_zenith_angle(1:ncol,b) .lt. &
-                           90._wp - 2._wp * spacing(90._wp)
+                     90._wp - 2._wp * spacing(90._wp)
 enddo
 allocate(sw_flux_up(ncol, nlay+1, nexp))
 allocate(sw_flux_dn(ncol, nlay+1, nexp))
 allocate(mu0(ncol))
 allocate(sfc_alb_spec(nbnd, ncol))
-call stop_on_err(sw_optical_props%alloc_2str(ncol, nlay, sw_k_dist))
+call stop_on_err(sw_optical_props%alloc_2str(ncol, nlay, sw_optics))
 allocate(sw_heating_rate(ncol, nlay, nexp))
 
-
 !Calculate present-day longwave heating rates.
-call calculate_lw_fluxes(1, lw_fluxes, lw_flux_up, lw_flux_dn, lw_k_dist, sfc_emis_spec, &
+call calculate_lw_fluxes(1, lw_fluxes, lw_flux_up, lw_flux_dn, lw_optics, sfc_emis_spec, &
                          sfc_emis, p_lay, p_lev, t_lay, sfc_t, lw_gas_conc_array, &
                          lw_optical_props, source, t_lev, top_at_1, ncol, n_quad_angles)
 lw_heating_rate(:,:,:) = 0.0
@@ -238,7 +271,7 @@ call calculate_heating_rate(lw_flux_up(:,:,1), lw_flux_dn(:,:,1), p_lev(:,:,1), 
 
 
 !Calculate present-day shortwave heating rates.
-call calculate_sw_fluxes(1, sw_fluxes, sw_flux_up, sw_flux_dn, sw_k_dist, p_lay, p_lev, &
+call calculate_sw_fluxes(1, sw_fluxes, sw_flux_up, sw_flux_dn, sw_optics, p_lay, p_lev, &
                          t_lay, sw_gas_conc_array, sw_optical_props, toa_flux, ncol, &
                          def_tsi, total_solar_irradiance, sfc_alb_spec, surface_albedo, &
                          mu0, solar_zenith_angle, usecol, top_at_1)
@@ -260,13 +293,15 @@ enddo
 
 tolerance = 0.01_wp
 num_iterations = 250
-do i = 1, num_iterations
+do i = 1, 1
+!do i = 1, num_iterations
   max_hr = 0._wp
   write(output_unit, "(a,i0.3,a,i0.3)") "Executing iteration ", i, "/", num_iterations
-  do b = 2, nexp
+! do b = 2, nexp
+  do b = 2, 2
 
     !Calculate longwave fluxes and heating rates.
-    call calculate_lw_fluxes(b, lw_fluxes, lw_flux_up, lw_flux_dn, lw_k_dist, sfc_emis_spec, &
+    call calculate_lw_fluxes(b, lw_fluxes, lw_flux_up, lw_flux_dn, lw_optics, sfc_emis_spec, &
                              sfc_emis, p_lay, p_lev, t_lay, sfc_t, lw_gas_conc_array, &
                              lw_optical_props, source, t_lev, top_at_1, ncol, n_quad_angles)
     call calculate_heating_rate(lw_flux_up(:,:,b), lw_flux_dn(:,:,b), p_lev(:,:,b), top_at_1, &
@@ -274,7 +309,7 @@ do i = 1, num_iterations
                                 lw_heating_rate(:,:,b))
 
     !Calculate shortwave fluxes and heating rates.
-    call calculate_sw_fluxes(b, sw_fluxes, sw_flux_up, sw_flux_dn, sw_k_dist, p_lay, p_lev, &
+    call calculate_sw_fluxes(b, sw_fluxes, sw_flux_up, sw_flux_dn, sw_optics, p_lay, p_lev, &
                              t_lay, sw_gas_conc_array, sw_optical_props, toa_flux, ncol, &
                              def_tsi, total_solar_irradiance, sfc_alb_spec, surface_albedo, &
                              mu0, solar_zenith_angle, usecol, top_at_1)
@@ -310,7 +345,7 @@ do i = 1, num_iterations
       enddo
     enddo
   enddo
-  write(output_unit, "(a,f)") "Maximum heating rate =", max_hr
+  write(output_unit, "(a,f9.5)") "Maximum heating rate =", max_hr
   if (max_hr .lt. tolerance) then
     exit
   endif
@@ -321,6 +356,13 @@ call write_output("dynamic_adjustments.nc", lw_flux_dn, lw_flux_up, sw_flux_dn, 
                   lw_heating_rate, sw_heating_rate, t_lev, t_lay)
 
 
+lw_optics => null()
+sw_optics => null()
+if (trim(model) .eq. trim(grtcode)) then
+  call lw_lbl%destroy()
+  call sw_lbl%destroy()
+endif
+call destroy_parser(parser)
 
 !Free memory.
 deallocate(p_lay)
@@ -434,7 +476,7 @@ subroutine calculate_lw_fluxes(experiment, fluxes, flux_up, flux_dn, k_dist, sfc
   type(ty_fluxes_broadband), intent(inout) :: fluxes
   real(wp), dimension(:,:,:), intent(inout), target :: flux_up
   real(wp), dimension(:,:,:), intent(inout), target :: flux_dn
-  type(ty_gas_optics_rrtmgp), intent(inout) :: k_dist
+  class(ty_gas_optics), intent(inout) :: k_dist
   real(wp), dimension(:,:), intent(inout) :: sfc_emis_spec
   real(wp), dimension(:,:), intent(in) :: sfc_emis
   real(wp), dimension(:,:,:), intent(in) :: p_lay
@@ -480,7 +522,7 @@ subroutine calculate_sw_fluxes(experiment, fluxes, flux_up, flux_dn, k_dist, p_l
   type(ty_fluxes_broadband), intent(inout) :: fluxes
   real(wp), dimension(:,:,:), intent(inout), target :: flux_up
   real(wp), dimension(:,:,:), intent(inout), target :: flux_dn
-  type(ty_gas_optics_rrtmgp), intent(inout) :: k_dist
+  class(ty_gas_optics), intent(inout) :: k_dist
   real(wp), dimension(:,:,:), intent(in) :: p_lay
   real(wp), dimension(:,:,:), intent(in) :: p_lev
   real(wp), dimension(:,:,:), intent(in) :: t_lay

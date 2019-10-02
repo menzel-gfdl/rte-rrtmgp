@@ -11,26 +11,27 @@ ifeq ($(RTE_KERNELS), openacc)
 endif
 RTE_KERNEL_DIR += ../rte/kernels
 RRTMGP_KERNEL_DIR += ../rrtmgp/kernels
-VPATH = $(RTE_DIR):$(RTE_KERNEL_DIR):$(RRTMGP_DIR):$(RRTMGP_KERNEL_DIR)
+VPATH = $(RTE_DIR):$(RTE_KERNEL_DIR):$(RRTMGP_DIR):$(RRTMGP_KERNEL_DIR):../gfdl-grtcode
 #
 # Compiler variables FC, FCFLAGS can be set in the environment or in Makefile.conf
 #
--include Makefile.conf
+-include Makefile.conf.gfortran
 
 all: librte.a librrtmgp.a
 
-COMPILE = $(FC) $(FCFLAGS) $(FCINCLUDE) $(CPPFLAGS) -c
+COMPILE = $(FC) $(FCFLAGS) $(FCINCLUDE) $(CPPFLAGS) -I../../gfdl-grtcode/fortran-bindings -c
 %.o: %.F90
 	$(COMPILE) $<
 
 include $(RTE_DIR)/Make.depends
 include $(RRTMGP_DIR)/Make.depends
+include ../gfdl-grtcode/Make.depends
 
 librte.a: $(RTE_SRC)
 	ar -rvs librte.a $(RTE_SRC)
 
-librrtmgp.a: $(RRTMGP_SRC)
-	ar -rvs librrtmgp.a $(RRTMGP_SRC)
+librrtmgp.a: $(RRTMGP_SRC) $(GFDL_GRTCODE_SRC)
+	ar -rvs librrtmgp.a $(RRTMGP_SRC) $(GFDL_GRTCODE_SRC)
 
 clean:
 	rm -f *.optrpt *.mod *.o librrtmgp.a librte.a

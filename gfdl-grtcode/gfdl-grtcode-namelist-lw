@@ -6,7 +6,7 @@
   water_vapor_continuum_directory = "/home/Raymond.Menzel/gfdl-grtcode/data/water_vapor_continuum"
   ozone_continuum_directory = "/home/Raymond.Menzel/gfdl-grtcode/data/ozone_continuum"
   cutoff_from_line_center = 25.
-  optical_depth_algorithm = 2
+  optical_depth_algorithm = 1
   C2F6_absorption_cross_sections_file = "/home/Raymond.Menzel/gfdl-grtcode/data/cfc_cross_sections/C2F6_absorption_cross_sections.csv"
   CCl4_absorption_cross_sections_file = "/home/Raymond.Menzel/gfdl-grtcode/data/cfc_cross_sections/CCl4_absorption_cross_sections.csv"
   CF4_absorption_cross_sections_file = "/home/Raymond.Menzel/gfdl-grtcode/data/cfc_cross_sections/CF4_absorption_cross_sections.csv"

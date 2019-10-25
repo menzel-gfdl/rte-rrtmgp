@@ -1,7 +1,7 @@
 &gfdl_grtcode_config
   spectral_grid_lower_bound = 1.0
   spectral_grid_upper_bound = 3250.0
-  spectral_grid_spacing = 0.1
+  spectral_grid_spacing = 0.01
   hitran_database = "/home/Raymond.Menzel/gfdl-grtcode/data/HITRAN_files/hitran2016.par"
   water_vapor_continuum_directory = "/home/Raymond.Menzel/gfdl-grtcode/data/water_vapor_continuum"
   ozone_continuum_directory = "/home/Raymond.Menzel/gfdl-grtcode/data/ozone_continuum"

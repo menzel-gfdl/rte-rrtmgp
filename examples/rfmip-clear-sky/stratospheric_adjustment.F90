@@ -81,7 +81,7 @@ integer, dimension(:,:), allocatable :: stratosphere_ending_index !Index corresp
                                                                   !toward, away from the surface (ncol, nexp).
 real(kind=wp), dimension(:,:,:), allocatable :: lw_heating_rate !Longwave heating rate [K/day] (ncol, nlay, nexp).
 real(kind=wp), dimension(:,:,:), allocatable :: sw_heating_rate !Shortwave heating rate [K/day] (ncol, nlay, nexp).
-real(kind=wp), dimension(:,:), allocatable :: dynamic_heating_rate !Dynamic heating rate [K/day] (ncol, nlay).
+real(kind=wp), dimension(:,:,:), allocatable :: dynamic_heating_rate !Dynamic heating rate [K/day] (ncol, nlay).
 real(kind=wp) :: dq
 real(kind=wp) :: d_hr
 real(kind=wp) :: lw_hr
@@ -99,7 +99,9 @@ type(Parser_t) :: parser
 type(ty_gas_optics_gfdl_grtcode), target :: lw_lbl
 type(ty_gas_optics_gfdl_grtcode), target :: sw_lbl
 character(len=512) :: buffer
-
+character(len=132) :: output_file
+integer :: block_size
+integer :: nblocks
 
 !Parse command line arguments.
 parser = create_parser()
@@ -113,6 +115,9 @@ call add_argument(parser, "-r", "RFMIP file.", requires_val=.true., &
                   long_name="--rfmip-file")
 call add_argument(parser, "-s", "Shortwave k-distribution file.", &
                   requires_val=.true., long_name="--sw-k-dist")
+call add_argument(parser, "-c", "File to continue from.", &
+                  requires_val=.true., long_name="--continue")
+call add_argument(parser, "-o", "Output file.", requires_val=.true.)
 call parse_args(parser)
 call get_argument(parser, "-r", buffer)
 if (trim(buffer) .eq. "not present") then
@@ -126,22 +131,24 @@ physics_index = 1
 n_quad_angles = 1
 
 !Read input atmospheric data.
-call read_and_block_pt(rfmip_file, ncol, p_lay, p_lev, t_lay, t_lev)
+block_size = 1
+nblocks = ncol/block_size
+call read_and_block_pt(rfmip_file, block_size, p_lay, p_lev, t_lay, t_lev)
 top_at_1 = p_lay(1,1,1) .lt. p_lay(1,nlay,1)
-call read_and_block_lw_bc(rfmip_file, ncol, sfc_emis, sfc_t)
-call read_and_block_sw_bc(rfmip_file, ncol, surface_albedo, &
+call read_and_block_lw_bc(rfmip_file, block_size, sfc_emis, sfc_t)
+call read_and_block_sw_bc(rfmip_file, block_size, surface_albedo, &
                           total_solar_irradiance, solar_zenith_angle)
 
 !Find pressure layer indices for the stratosphere.
-allocate(stratosphere_starting_index(ncol, nexp))
-allocate(stratosphere_ending_index(ncol, nexp))
+allocate(stratosphere_starting_index(block_size, nexp*nblocks))
+allocate(stratosphere_ending_index(block_size, nexp*nblocks))
 if (top_at_1) then
   stratosphere_starting_index(:,:) = 1
 else
   stratosphere_ending_index(:,:) = nlay
 endif
-do k = 1, nexp
-  do i = 1, ncol
+do k = 1, nexp*nblocks
+  do i = 1, block_size
     do j = 1, nlay
       if (top_at_1) then
         if (p_lay(i,j,k) .gt. stratosphere_max_pressure) then
@@ -169,7 +176,7 @@ else
 endif
 call determine_gas_names(rfmip_file, lw_kdist_file, forcing_index, &
                          lw_kdist_gas_names, lw_rfmip_gas_games)
-call read_and_block_gases_ty(rfmip_file, ncol, lw_kdist_gas_names, &
+call read_and_block_gases_ty(rfmip_file, block_size, lw_kdist_gas_names, &
                              lw_rfmip_gas_games, lw_gas_conc_array)
 write(output_unit, *) "Lw calculation uses RFMIP gases: ", &
                       (trim(lw_rfmip_gas_games(b))//" ", &
@@ -185,10 +192,10 @@ if (top_at_1) then
 else
   p_lev(:,nlay+1,:) = lw_k_dist%get_press_min() + epsilon(lw_k_dist%get_press_min())
 endif
-call stop_on_err(k_dist_source%alloc(ncol, nlay, lw_k_dist))
-call stop_on_err(lw_k_dist_optical_props%alloc_1scl(ncol, nlay, lw_k_dist))
+call stop_on_err(k_dist_source%alloc(block_size, nlay, lw_k_dist))
+call stop_on_err(lw_k_dist_optical_props%alloc_1scl(block_size, nlay, lw_k_dist))
 nbnd = lw_k_dist%get_nband()
-allocate(k_dist_sfc_emis_spec(nbnd, ncol))
+allocate(k_dist_sfc_emis_spec(nbnd, block_size))
 
 !Initialize line-by-line.
 call get_argument(parser, "-m", buffer)
@@ -197,14 +204,14 @@ if (trim(buffer) .eq. "not present") then
 endif
 call rs_set_verbosity(3)
 call stop_on_err(lw_lbl%initialize(buffer, nlay+1, lw_gas_conc_array(1)%gas_name))
-call stop_on_err(lbl_source%alloc(ncol, nlay, lw_lbl))
-call stop_on_err(lw_lbl_optical_props%alloc_1scl(ncol, nlay, lw_lbl))
+call stop_on_err(lbl_source%alloc(block_size, nlay, lw_lbl))
+call stop_on_err(lw_lbl_optical_props%alloc_1scl(block_size, nlay, lw_lbl))
 nbnd = lw_lbl%get_nband()
-allocate(lbl_sfc_emis_spec(nbnd, ncol))
+allocate(lbl_sfc_emis_spec(nbnd, block_size))
 
-allocate(lw_flux_up(ncol, nlay+1, nexp))
-allocate(lw_flux_dn(ncol, nlay+1, nexp))
-allocate(lw_heating_rate(ncol, nlay, nexp))
+allocate(lw_flux_up(block_size, nlay+1, nexp*nblocks))
+allocate(lw_flux_dn(block_size, nlay+1, nexp*nblocks))
+allocate(lw_heating_rate(block_size, nlay, nexp*nblocks))
 
 
 !Initialize shortwave.
@@ -216,7 +223,7 @@ else
 endif
 call determine_gas_names(rfmip_file, sw_kdist_file, forcing_index, &
                          sw_kdist_gas_names, sw_rfmip_gas_games)
-call read_and_block_gases_ty(rfmip_file, ncol, sw_kdist_gas_names, &
+call read_and_block_gases_ty(rfmip_file, block_size, sw_kdist_gas_names, &
                              sw_rfmip_gas_games, sw_gas_conc_array)
 write(output_unit, *) "Sw calculation uses RFMIP gases: ", &
                       (trim(sw_rfmip_gas_games(b))//" ", &
@@ -234,9 +241,9 @@ else
 endif
 nbnd = sw_k_dist%get_nband()
 ngpt = sw_k_dist%get_ngpt()
-allocate(k_dist_toa_flux(ncol, ngpt))
-allocate(k_dist_sfc_alb_spec(nbnd, ncol))
-call stop_on_err(sw_k_dist_optical_props%alloc_2str(ncol, nlay, sw_k_dist))
+allocate(k_dist_toa_flux(block_size, ngpt))
+allocate(k_dist_sfc_alb_spec(nbnd, block_size))
+call stop_on_err(sw_k_dist_optical_props%alloc_2str(block_size, nlay, sw_k_dist))
 
 !Initialize line-by-line.
 call get_argument(parser, "-n", buffer)
@@ -247,77 +254,84 @@ call rs_set_verbosity(3)
 call stop_on_err(sw_lbl%initialize(buffer, nlay+1, sw_gas_conc_array(1)%gas_name))
 nbnd = sw_lbl%get_nband()
 ngpt = sw_lbl%get_ngpt()
-allocate(lbl_toa_flux(ncol, ngpt))
-allocate(lbl_sfc_alb_spec(nbnd, ncol))
-call stop_on_err(sw_lbl_optical_props%alloc_2str(ncol, nlay, sw_lbl))
+allocate(lbl_toa_flux(block_size, ngpt))
+allocate(lbl_sfc_alb_spec(nbnd, block_size))
+call stop_on_err(sw_lbl_optical_props%alloc_2str(block_size, nlay, sw_lbl))
 
-allocate(def_tsi(ncol))
-allocate(mu0(ncol))
-allocate(usecol(ncol, nexp))
-do b = 1, nexp
-  usecol(1:ncol,b) = solar_zenith_angle(1:ncol,b) .lt. &
-                     90._wp - 2._wp * spacing(90._wp)
+allocate(def_tsi(block_size))
+allocate(mu0(block_size))
+allocate(usecol(block_size, nexp*nblocks))
+do b = 1, nexp*nblocks
+  usecol(1:block_size,b) = solar_zenith_angle(1:block_size,b) .lt. &
+                           90._wp - 2._wp * spacing(90._wp)
 enddo
-allocate(sw_flux_up(ncol, nlay+1, nexp))
-allocate(sw_flux_dn(ncol, nlay+1, nexp))
-allocate(sw_heating_rate(ncol, nlay, nexp))
+allocate(sw_flux_up(block_size, nlay+1, nexp*nblocks))
+allocate(sw_flux_dn(block_size, nlay+1, nexp*nblocks))
+allocate(sw_heating_rate(block_size, nlay, nexp*nblocks))
 
-!Calculate present-day longwave heating rates.
-!call calculate_lw_fluxes(1, lw_fluxes, lw_flux_up, lw_flux_dn, lw_lbl, lbl_sfc_emis_spec, &
-!                         sfc_emis, p_lay, p_lev, t_lay, sfc_t, lw_gas_conc_array, &
-!                         lw_lbl_optical_props, lbl_source, t_lev, top_at_1, ncol, n_quad_angles)
-call calculate_lw_fluxes(1, lw_fluxes, lw_flux_up, lw_flux_dn, lw_k_dist, k_dist_sfc_emis_spec, &
-                         sfc_emis, p_lay, p_lev, t_lay, sfc_t, lw_gas_conc_array, &
-                         lw_k_dist_optical_props, k_dist_source, t_lev, top_at_1, ncol, n_quad_angles)
-lw_heating_rate(:,:,:) = 0.0
-call calculate_heating_rate(lw_flux_up(:,:,1), lw_flux_dn(:,:,1), p_lev(:,:,1), top_at_1, &
-                            stratosphere_starting_index(:,1), stratosphere_ending_index(:,1), &
-                            lw_heating_rate(:,:,1))
+call get_argument(parser, "-c", buffer)
+if (trim(buffer) .eq. "not present") then
+  !Calculate present-day longwave heating rates.
+  call calculate_lw_fluxes(1, lw_fluxes, lw_flux_up, lw_flux_dn, lw_lbl, lbl_sfc_emis_spec, &
+                           sfc_emis, p_lay, p_lev, t_lay, sfc_t, lw_gas_conc_array, &
+                           lw_lbl_optical_props, lbl_source, t_lev, top_at_1, block_size, &
+                           nblocks, n_quad_angles)
+  lw_heating_rate(:,:,:) = 0.0
+  call calculate_heating_rate(1, lw_flux_up, lw_flux_dn, p_lev, top_at_1, &
+                              stratosphere_starting_index, stratosphere_ending_index, &
+                              block_size, nblocks, lw_heating_rate)
 
-!Calculate present-day shortwave heating rates.
-!call calculate_sw_fluxes(1, sw_fluxes, sw_flux_up, sw_flux_dn, sw_lbl, p_lay, p_lev, &
-!                         t_lay, sw_gas_conc_array, sw_lbl_optical_props, lbl_toa_flux, ncol, &
-!                         def_tsi, total_solar_irradiance, lbl_sfc_alb_spec, surface_albedo, &
-!                         mu0, solar_zenith_angle, usecol, top_at_1, t_lev)
-call calculate_sw_fluxes(1, sw_fluxes, sw_flux_up, sw_flux_dn, sw_k_dist, p_lay, p_lev, &
-                         t_lay, sw_gas_conc_array, sw_k_dist_optical_props, k_dist_toa_flux, ncol, &
-                         def_tsi, total_solar_irradiance, k_dist_sfc_alb_spec, surface_albedo, &
-                         mu0, solar_zenith_angle, usecol, top_at_1, t_lev)
-sw_heating_rate(:,:,:) = 0.0
-call calculate_heating_rate(sw_flux_up(:,:,1), sw_flux_dn(:,:,1), p_lev(:,:,1), top_at_1, &
-                            stratosphere_starting_index(:,1), stratosphere_ending_index(:,1), &
-                            sw_heating_rate(:,:,1))
+  !Calculate present-day shortwave heating rates.
+  call calculate_sw_fluxes(1, sw_fluxes, sw_flux_up, sw_flux_dn, sw_lbl, p_lay, p_lev, &
+                           t_lay, sw_gas_conc_array, sw_lbl_optical_props, lbl_toa_flux, &
+                           def_tsi, total_solar_irradiance, lbl_sfc_alb_spec, surface_albedo, &
+                           mu0, solar_zenith_angle, usecol, top_at_1, block_size, nblocks, &
+                           t_lev)
+  sw_heating_rate(:,:,:) = 0.0
+  call calculate_heating_rate(1, sw_flux_up, sw_flux_dn, p_lev, top_at_1, &
+                              stratosphere_starting_index, stratosphere_ending_index, &
+                              block_size, nblocks, sw_heating_rate)
 
-!Calculate the "dynamic" heating rate.
-allocate(dynamic_heating_rate(ncol, nlay))
-dynamic_heating_rate(:,:) = 0._wp
-do i = 1, ncol
-  do j = stratosphere_starting_index(i,1), stratosphere_ending_index(i,1)
-    dynamic_heating_rate(i,j) = -1._wp*(lw_heating_rate(i,j,1) + sw_heating_rate(i,j,1))
+  !Calculate the "dynamic" heating rate.
+  allocate(dynamic_heating_rate(block_size, nlay, nblocks))
+  dynamic_heating_rate(:,:,:) = 0._wp
+  do b = 1, nblocks
+    do i = 1, block_size
+      do j = stratosphere_starting_index(i,b), stratosphere_ending_index(i,b)
+        dynamic_heating_rate(i,j,b) = -1._wp*(lw_heating_rate(i,j,b) + sw_heating_rate(i,j,b))
+      enddo
+    enddo
   enddo
-enddo
-
+else
+! call read_input(trim(buffer), dynamic_heating_rate, ncol, nlay, &
+!                 nexp, t_lay, t_lev)
+  lw_heating_rate(:,:,:) = 0.0
+  sw_heating_rate(:,:,:) = 0.0
+endif
 
 tolerance = 0.01_wp
-num_iterations = 250
+!num_iterations = 250
+num_iterations = 2
+#ifdef FOOBAR
 do i = 1, num_iterations
   max_hr = 0._wp
   write(output_unit, "(a,i0.3,a,i0.3)") "Executing iteration ", i, "/", num_iterations
-  do b = 2, nexp
+  do b = 2, 2
+! do b = 2, nexp
 
     !Calculate longwave fluxes and heating rates.
-    call calculate_lw_fluxes(b, lw_fluxes, lw_flux_up, lw_flux_dn, lw_k_dist, k_dist_sfc_emis_spec, &
+    call calculate_lw_fluxes(1, lw_fluxes, lw_flux_up, lw_flux_dn, lw_lbl, lbl_sfc_emis_spec, &
                              sfc_emis, p_lay, p_lev, t_lay, sfc_t, lw_gas_conc_array, &
-                             lw_k_dist_optical_props, k_dist_source, t_lev, top_at_1, ncol, n_quad_angles)
+                             lw_lbl_optical_props, lbl_source, t_lev, top_at_1, ncol, n_quad_angles)
     call calculate_heating_rate(lw_flux_up(:,:,b), lw_flux_dn(:,:,b), p_lev(:,:,b), top_at_1, &
                                 stratosphere_starting_index(:,b), stratosphere_ending_index(:,b), &
                                 lw_heating_rate(:,:,b))
 
     !Calculate shortwave fluxes and heating rates.
-    call calculate_sw_fluxes(b, sw_fluxes, sw_flux_up, sw_flux_dn, sw_k_dist, p_lay, p_lev, &
-                             t_lay, sw_gas_conc_array, sw_k_dist_optical_props, k_dist_toa_flux, ncol, &
-                             def_tsi, total_solar_irradiance, k_dist_sfc_alb_spec, surface_albedo, &
-                             mu0, solar_zenith_angle, usecol, top_at_1)
+    call calculate_sw_fluxes(b, sw_fluxes, sw_flux_up, sw_flux_dn, sw_lbl, p_lay, p_lev, &
+                             t_lay, sw_gas_conc_array, sw_lbl_optical_props, lbl_toa_flux, ncol, &
+                             def_tsi, total_solar_irradiance, lbl_sfc_alb_spec, surface_albedo, &
+                             mu0, solar_zenith_angle, usecol, top_at_1, t_lev)
     call calculate_heating_rate(sw_flux_up(:,:,b), sw_flux_dn(:,:,b), p_lev(:,:,b), top_at_1, &
                                 stratosphere_starting_index(:,b), stratosphere_ending_index(:,b), &
                                 sw_heating_rate(:,:,b))
@@ -355,11 +369,18 @@ do i = 1, num_iterations
     exit
   endif
 enddo
+#endif
 
 !Write data to the output file.
-call write_output("dynamic_adjustments.nc", lw_flux_dn, lw_flux_up, sw_flux_dn, sw_flux_up, &
+call get_argument(parser, "-o", buffer)
+if (trim(buffer) .eq. "not present") then
+  output_file = "dynamic_adjustments.nc"
+else
+  output_file = trim(buffer)
+endif
+call write_output(output_file, lw_flux_dn, lw_flux_up, sw_flux_dn, sw_flux_up, &
                   lw_heating_rate, sw_heating_rate, t_lev, t_lay, &
-                  dynamic_heating_rate)
+                  dynamic_heating_rate, nexp)
 
 
 call lw_lbl%destroy()
@@ -432,42 +453,47 @@ subroutine interpolate(x1, x2, y1, y2, x, y)
 end subroutine interpolate
 
 
-subroutine calculate_heating_rate(flux_up, flux_down, p, top_at_1, layer_starting_index, &
-                                  layer_ending_index, heating_rate)
+subroutine calculate_heating_rate(experiment, flux_up, flux_down, p, top_at_1, &
+                                  layer_starting_index, layer_ending_index, block_size, &
+                                  nblocks, heating_rate)
 
-  real(kind=wp), dimension(:,:), intent(in) :: flux_up !Upwelling flux [W/m^2]. (column, level).
-  real(kind=wp), dimension(:,:), intent(in) :: flux_down !Downwelling flux [W/m^2]. (column, level).
-  real(kind=wp), dimension(:,:), intent(in) :: p !Pressure at atmospheric levels [Pa]. (column, level).
+  integer, intent(in) :: experiment !Forcing scenario.
+  real(kind=wp), dimension(:,:,:), intent(in) :: flux_up !Upwelling flux [W/m^2]. (column, level).
+  real(kind=wp), dimension(:,:,:), intent(in) :: flux_down !Downwelling flux [W/m^2]. (column, level).
+  real(kind=wp), dimension(:,:,:), intent(in) :: p !Pressure at atmospheric levels [Pa]. (column, level).
   logical, intent(in) :: top_at_1 !Is toa the first level?.
-  integer, dimension(:), intent(in) :: layer_starting_index !Starting layer that heating rates
+  integer, dimension(:,:), intent(in) :: layer_starting_index !Starting layer that heating rates
+                                                              !will be calculated for.
+  integer, dimension(:,:), intent(in) :: layer_ending_index !Ending layer that heating rates
                                                             !will be calculated for.
-  integer, dimension(:), intent(in) :: layer_ending_index !Ending layer that heating rates
-                                                          !will be calculated for.
-  real(kind=wp), dimension(:,:), intent(inout) :: heating_rate ![K/day].
+  integer, intent(in) :: block_size
+  integer, intent(in) :: nblocks
+  real(kind=wp), dimension(:,:,:), intent(inout) :: heating_rate ![K/day].
 
-  integer :: ncol
-  integer :: nlay
+  integer :: b
+  real(kind=wp), parameter :: cp = 1004.6_wp !Specific heat of air at constant pressure [J/(kg*K)].
+  real(kind=wp) :: dp ![Pa].
+  real(kind=wp), parameter :: g = 9.8_wp !Acceleration due to gravity [m/s].
   integer :: i
   integer :: j
-  real(kind=wp) :: dp ![Pa].
-  real(kind=wp) :: rho ![kg/m^2].
   real(kind=wp) :: net_flux ![W/m^2].
-  real(kind=wp), parameter :: cp = 1004.6_wp !Specific heat of air at constant pressure [J/(kg*K)].
-  real(kind=wp), parameter :: g = 9.8_wp !Acceleration due to gravity [m/s].
+  integer :: o
+  real(kind=wp) :: rho ![kg/m^2].
   real(kind=wp), parameter :: spd = 86400._wp !Seconds per day [s/day].
 
   !Calculate the integrated number density across each layer.
-  ncol = size(flux_up, 1)
-  nlay = size(flux_up, 2) - 1
-  do i = 1, ncol
-    do j = layer_starting_index(i), layer_ending_index(i)
-      dp = abs(p(i,j) - p(i,j+1))
-      rho = dp/g
-      net_flux = flux_down(i,j) - flux_up(i,j) - flux_down(i,j+1) + flux_up(i,j+1)
-      if (.not. top_at_1) then
-        net_flux = -1._wp*net_flux
-      endif
-      heating_rate(i,j) = (net_flux*spd)/(cp*rho)
+  do b = 1, nblocks
+    o = (experiment-1)*nblocks + b
+    do i = 1, block_size
+      do j = layer_starting_index(i,o), layer_ending_index(i,o)
+        dp = abs(p(i,j,o) - p(i,j+1,o))
+        rho = dp/g
+        net_flux = flux_down(i,j,o) - flux_up(i,j,o) - flux_down(i,j+1,o) + flux_up(i,j+1,o)
+        if (.not. top_at_1) then
+          net_flux = -1._wp*net_flux
+        endif
+        heating_rate(i,j,o) = (net_flux*spd)/(cp*rho)
+      enddo
     enddo
   enddo
 end subroutine calculate_heating_rate
@@ -475,7 +501,8 @@ end subroutine calculate_heating_rate
 
 subroutine calculate_lw_fluxes(experiment, fluxes, flux_up, flux_dn, k_dist, sfc_emis_spec, &
                                sfc_emis, p_lay, p_lev, t_lay, sfc_t, gas_conc_array, &
-                               optical_props, source, t_lev, top_at_1, ncol, n_quad_angles)
+                               optical_props, source, t_lev, top_at_1, block_size, &
+                               nblocks, n_quad_angles)
 
   integer, intent(in) :: experiment
   type(ty_fluxes_broadband), intent(inout) :: fluxes
@@ -493,35 +520,40 @@ subroutine calculate_lw_fluxes(experiment, fluxes, flux_up, flux_dn, k_dist, sfc
   type(ty_source_func_lw), intent(inout) :: source
   real(wp), dimension(:,:,:), intent(in) :: t_lev
   logical, intent(in) :: top_at_1
-  integer, intent(in) :: ncol
+  integer, intent(in) :: block_size
+  integer, intent(in) :: nblocks
   integer, intent(in) :: n_quad_angles
 
   integer :: b
-  integer :: nbnd
-  integer :: icol
   integer :: ibnd
+  integer :: icol
+  integer :: nbnd
+  integer :: o
 
-  b = experiment
   nbnd = k_dist%get_nband()
-  fluxes%flux_up => flux_up(:,:,b)
-  fluxes%flux_dn => flux_dn(:,:,b)
-  do icol = 1, ncol
-    do ibnd = 1, nbnd
-      sfc_emis_spec(ibnd,icol) = sfc_emis(icol,b)
+  do b = 1, nblocks
+    o = (experiment-1)*nblocks + b
+    fluxes%flux_up => flux_up(:,:,o)
+    fluxes%flux_dn => flux_dn(:,:,o)
+    do icol = 1, block_size
+      do ibnd = 1, nbnd
+        sfc_emis_spec(ibnd,icol) = sfc_emis(icol,o)
+      enddo
     enddo
+    call stop_on_err(k_dist%gas_optics(p_lay(:,:,o), p_lev(:,:,o), t_lay(:,:,o), sfc_t(:,o), &
+                                       gas_conc_array(o), optical_props, source, &
+                                       tlev=t_lev(:,:,o)))
+    call stop_on_err(rte_lw(optical_props, top_at_1, source, sfc_emis_spec, fluxes, &
+                            n_gauss_angles=n_quad_angles))
   enddo
-  call stop_on_err(k_dist%gas_optics(p_lay(:,:,b), p_lev(:,:,b), t_lay(:,:,b), sfc_t(:,b), &
-                                     gas_conc_array(b), optical_props, source, &
-                                     tlev=t_lev(:,:,b)))
-  call stop_on_err(rte_lw(optical_props, top_at_1, source, sfc_emis_spec, fluxes, &
-                          n_gauss_angles=n_quad_angles))
 end subroutine calculate_lw_fluxes
 
 
 subroutine calculate_sw_fluxes(experiment, fluxes, flux_up, flux_dn, k_dist, p_lay, p_lev, &
-                               t_lay, gas_conc_array, optical_props, toa_flux, ncol, &
+                               t_lay, gas_conc_array, optical_props, toa_flux, &
                                def_tsi, total_solar_irradiance, sfc_alb_spec, surface_albedo, &
-                               mu0, solar_zenith_angle, usecol, top_at_1, t_lev)
+                               mu0, solar_zenith_angle, usecol, top_at_1, block_size, nblocks, &
+                               t_lev)
 
   integer, intent(in) :: experiment
   type(ty_fluxes_broadband), intent(inout) :: fluxes
@@ -534,7 +566,6 @@ subroutine calculate_sw_fluxes(experiment, fluxes, flux_up, flux_dn, k_dist, p_l
   type(ty_gas_concs), dimension(:), intent(in) :: gas_conc_array
   type(ty_optical_props_2str), intent(inout) :: optical_props
   real(wp), dimension(:,:), intent(inout) :: toa_flux
-  integer, intent(in) :: ncol
   real(wp), dimension(:), intent(inout) :: def_tsi
   real(wp), dimension(:,:), intent(in) :: total_solar_irradiance
   real(wp), dimension(:,:), intent(inout) :: sfc_alb_spec
@@ -543,52 +574,57 @@ subroutine calculate_sw_fluxes(experiment, fluxes, flux_up, flux_dn, k_dist, p_l
   real(wp), dimension(:,:), intent(in) :: solar_zenith_angle
   logical, dimension(:,:), intent(in) :: usecol
   logical, intent(in) :: top_at_1
+  integer, intent(in) :: block_size
+  integer, intent(in) :: nblocks
   real(wp), dimension(:,:,:), intent(in), optional :: t_lev
 
   integer :: b
-  integer :: nbnd
+  real(wp), parameter :: deg_to_rad = acos(-1._wp)/180._wp
+  integer :: ibnd
   integer :: icol
   integer :: igpt
-  integer :: ibnd
+  integer :: nbnd
   integer :: ngpt
-  real(wp), parameter :: deg_to_rad = acos(-1._wp)/180._wp
+  integer :: o
 
-  b = experiment
   nbnd = k_dist%get_nband()
   ngpt = k_dist%get_ngpt()
-  fluxes%flux_up => flux_up(:,:,b)
-  fluxes%flux_dn => flux_dn(:,:,b)
-  call stop_on_err(k_dist%gas_optics(p_lay(:,:,b), p_lev(:,:,b), t_lay(:,:,b), &
-                                     gas_conc_array(b), optical_props, toa_flux, &
-                                     tlev=t_lev(:,:,b)))
-  do icol = 1, ncol
-    def_tsi(icol) = toa_flux(icol, 1)
-  enddo
-  do igpt = 1, ngpt
-    do icol = 1, ncol
-      def_tsi(icol) = def_tsi(icol) + toa_flux(icol, igpt)
+  do b = 1, nblocks
+    o = (experiment-1)*nblocks + b
+    fluxes%flux_up => flux_up(:,:,o)
+    fluxes%flux_dn => flux_dn(:,:,o)
+    call stop_on_err(k_dist%gas_optics(p_lay(:,:,o), p_lev(:,:,o), t_lay(:,:,o), &
+                                       gas_conc_array(o), optical_props, toa_flux, &
+                                       tlev=t_lev(:,:,o)))
+    do icol = 1, block_size
+      def_tsi(icol) = toa_flux(icol, 1)
     enddo
-  enddo
-  do igpt = 1, ngpt
-    do icol = 1, ncol
-      toa_flux(icol,igpt) = toa_flux(icol,igpt) * total_solar_irradiance(icol,b)/def_tsi(icol)
+    do igpt = 1, ngpt
+      do icol = 1, block_size
+        def_tsi(icol) = def_tsi(icol) + toa_flux(icol, igpt)
+      enddo
     enddo
-  enddo
-  do icol = 1, ncol
-    do ibnd = 1, nbnd
-      sfc_alb_spec(ibnd,icol) = surface_albedo(icol,b)
+    do igpt = 1, ngpt
+      do icol = 1, block_size
+        toa_flux(icol,igpt) = toa_flux(icol,igpt)*total_solar_irradiance(icol,o)/def_tsi(icol)
+      enddo
     enddo
-  enddo
-  do icol = 1, ncol
-    mu0(icol) = merge(cos(solar_zenith_angle(icol,b)*deg_to_rad), 1._wp, usecol(icol,b))
-  end do
-  call stop_on_err(rte_sw(optical_props, top_at_1, mu0, toa_flux, sfc_alb_spec, &
-                          sfc_alb_spec, fluxes))
-  do icol = 1, ncol
-    if (.not. usecol(icol,b)) then
-      flux_up(icol,:,b) = 0._wp
-      flux_dn(icol,:,b) = 0._wp
-    endif
+    do icol = 1, block_size
+      do ibnd = 1, nbnd
+        sfc_alb_spec(ibnd,icol) = surface_albedo(icol,o)
+      enddo
+    enddo
+    do icol = 1, block_size
+      mu0(icol) = merge(cos(solar_zenith_angle(icol,o)*deg_to_rad), 1._wp, usecol(icol,o))
+    end do
+    call stop_on_err(rte_sw(optical_props, top_at_1, mu0, toa_flux, sfc_alb_spec, &
+                            sfc_alb_spec, fluxes))
+    do icol = 1, block_size
+      if (.not. usecol(icol,o)) then
+        flux_up(icol,:,o) = 0._wp
+        flux_dn(icol,:,o) = 0._wp
+      endif
+    enddo
   enddo
 end subroutine calculate_sw_fluxes
 
@@ -606,21 +642,39 @@ subroutine catch_netcdf_error(code)
 end subroutine catch_netcdf_error
 
 
-subroutine switch_col_and_z_3d(in_var, out_var)
+subroutine switch_col_and_z_3d(in_var, out_var, nexp)
 
   real(kind=wp), dimension(:,:,:), intent(in) :: in_var
   real(kind=wp), dimension(:,:,:), allocatable, intent(inout) :: out_var
+  integer, intent(in), optional :: nexp
 
-  integer :: i
+  integer :: b
+  integer :: block_size
   integer :: j
   integer :: k
+  integer :: n
+  integer :: nblocks
+  integer :: ncol
+  integer :: o
+  integer :: o2
 
   if (allocated(out_var)) deallocate(out_var)
-  allocate(out_var(size(in_var, 2), size(in_var, 1), size(in_var, 3)))
-  do k = 1, size(in_var, 3)
-    do j = 1, size(in_var, 1)
-      do i = 1, size(in_var, 2)
-        out_var(i,j,k) = in_var(j,i,k)
+  if (present(nexp)) then
+    n = nexp
+  else
+    n = 1
+  endif
+  nblocks = size(in_var, 3)/n
+  ncol = size(in_var, 1)*size(in_var, 3)/n
+  block_size = size(in_var, 1)
+  allocate(out_var(size(in_var, 2), ncol, n))
+  do b = 1, nblocks*n
+    do j = 1, size(in_var,2)
+      do k = 1, block_size
+        o = (b-1)*block_size + k
+        o2 = (o-1)/ncol + 1
+        o = o - (o2-1)*ncol
+        out_var(j,o,o2) = in_var(k,j,b)
       enddo
     enddo
   enddo
@@ -647,7 +701,7 @@ end subroutine switch_col_and_z_2d
 
 subroutine write_output(path, lw_flux_dn, lw_flux_up, sw_flux_dn, sw_flux_up, &
                         lw_heating_rate, sw_heating_rate, t_lev, t_lay, &
-                        dynamic_heating_rate)
+                        dynamic_heating_rate, nexp)
 
   character(len=*), intent(in) :: path
   real(kind=wp), dimension(:,:,:), intent(in) :: lw_flux_dn
@@ -658,7 +712,8 @@ subroutine write_output(path, lw_flux_dn, lw_flux_up, sw_flux_dn, sw_flux_up, &
   real(kind=wp), dimension(:,:,:), intent(in) :: sw_heating_rate
   real(kind=wp), dimension(:,:,:), intent(in) :: t_lev
   real(kind=wp), dimension(:,:,:), intent(in) :: t_lay
-  real(kind=wp), dimension(:,:), intent(in) :: dynamic_heating_rate
+  real(kind=wp), dimension(:,:,:), intent(in) :: dynamic_heating_rate
+  integer, intent(in) :: nexp
 
   integer :: ncid
   enum, bind(c)
@@ -687,15 +742,12 @@ subroutine write_output(path, lw_flux_dn, lw_flux_up, sw_flux_dn, sw_flux_up, &
     enumerator :: num_vars = 14
   end enum
   integer, dimension(num_vars) :: varid
-  real(kind=wp), dimension(:,:), allocatable :: buffer2d
   real(kind=wp), dimension(:,:,:), allocatable :: buffer3d
-  integer :: nexp
   integer :: ncol
   integer :: nlev
 
-  nexp = size(lw_flux_dn, 3)
-  ncol = size(lw_flux_dn, 1)
   nlev = size(lw_flux_dn, 2)
+  ncol = size(lw_flux_dn)/(nexp*nlev)
   call catch_netcdf_error(nf90_create(path, ior(nf90_clobber, nf90_netcdf4), ncid))
   call catch_netcdf_error(nf90_def_dim(ncid, "nexpt", nexp, dimid(expt)))
   call catch_netcdf_error(nf90_def_dim(ncid, "site", ncol, dimid(site)))
@@ -710,7 +762,7 @@ subroutine write_output(path, lw_flux_dn, lw_flux_up, sw_flux_dn, sw_flux_up, &
   call catch_netcdf_error(nf90_put_att(ncid, varid(rld), "standard_name", "downwelling_longwave_flux_in_air"))
   call catch_netcdf_error(nf90_put_att(ncid, varid(rld), "units", "W m-2"))
   call catch_netcdf_error(nf90_put_att(ncid, varid(rld), "variable_id", "rld"))
-  call switch_col_and_z_3d(lw_flux_dn, buffer3d)
+  call switch_col_and_z_3d(lw_flux_dn, buffer3d, nexp)
   call catch_netcdf_error(nf90_put_var(ncid, varid(rld), buffer3d))
 
   call catch_netcdf_error(nf90_def_var(ncid, "rlu", nf90_float, (/dimid(level), dimid(site), dimid(expt)/), varid(rlu)))
@@ -721,7 +773,7 @@ subroutine write_output(path, lw_flux_dn, lw_flux_up, sw_flux_dn, sw_flux_up, &
   call catch_netcdf_error(nf90_put_att(ncid, varid(rlu), "standard_name", "upwelling_longwave_flux_in_air"))
   call catch_netcdf_error(nf90_put_att(ncid, varid(rlu), "units", "W m-2"))
   call catch_netcdf_error(nf90_put_att(ncid, varid(rlu), "variable_id", "rlu"))
-  call switch_col_and_z_3d(lw_flux_up, buffer3d)
+  call switch_col_and_z_3d(lw_flux_up, buffer3d, nexp)
   call catch_netcdf_error(nf90_put_var(ncid, varid(rlu), buffer3d))
 
   call catch_netcdf_error(nf90_def_var(ncid, "rsd", nf90_float, (/dimid(level), dimid(site), dimid(expt)/), varid(rsd)))
@@ -732,7 +784,7 @@ subroutine write_output(path, lw_flux_dn, lw_flux_up, sw_flux_dn, sw_flux_up, &
   call catch_netcdf_error(nf90_put_att(ncid, varid(rsd), "standard_name", "downwelling_shortwave_flux_in_air"))
   call catch_netcdf_error(nf90_put_att(ncid, varid(rsd), "units", "W m-2"))
   call catch_netcdf_error(nf90_put_att(ncid, varid(rsd), "variable_id", "rsd"))
-  call switch_col_and_z_3d(sw_flux_dn, buffer3d)
+  call switch_col_and_z_3d(sw_flux_dn, buffer3d, nexp)
   call catch_netcdf_error(nf90_put_var(ncid, varid(rsd), buffer3d))
 
   call catch_netcdf_error(nf90_def_var(ncid, "rsu", nf90_float, (/dimid(level), dimid(site), dimid(expt)/), varid(rsu)))
@@ -743,7 +795,7 @@ subroutine write_output(path, lw_flux_dn, lw_flux_up, sw_flux_dn, sw_flux_up, &
   call catch_netcdf_error(nf90_put_att(ncid, varid(rsu), "standard_name", "upwelling_shortave_flux_in_air"))
   call catch_netcdf_error(nf90_put_att(ncid, varid(rsu), "units", "W m-2"))
   call catch_netcdf_error(nf90_put_att(ncid, varid(rsu), "variable_id", "rsu"))
-  call switch_col_and_z_3d(sw_flux_up, buffer3d)
+  call switch_col_and_z_3d(sw_flux_up, buffer3d, nexp)
   call catch_netcdf_error(nf90_put_var(ncid, varid(rsu), buffer3d))
 
   call catch_netcdf_error(nf90_def_var(ncid, "rlhr", nf90_float, (/dimid(layer), dimid(site), dimid(expt)/), varid(rlhr)))
@@ -754,7 +806,7 @@ subroutine write_output(path, lw_flux_dn, lw_flux_up, sw_flux_dn, sw_flux_up, &
   call catch_netcdf_error(nf90_put_att(ncid, varid(rlhr), "standard_name", "longwave_heating_rate_in_air"))
   call catch_netcdf_error(nf90_put_att(ncid, varid(rlhr), "units", "K day-1"))
   call catch_netcdf_error(nf90_put_att(ncid, varid(rlhr), "variable_id", "rlhr"))
-  call switch_col_and_z_3d(lw_heating_rate, buffer3d)
+  call switch_col_and_z_3d(lw_heating_rate, buffer3d, nexp)
   call catch_netcdf_error(nf90_put_var(ncid, varid(rlhr), buffer3d))
 
   call catch_netcdf_error(nf90_def_var(ncid, "rshr", nf90_float, (/dimid(layer), dimid(site), dimid(expt)/), varid(rshr)))
@@ -765,7 +817,7 @@ subroutine write_output(path, lw_flux_dn, lw_flux_up, sw_flux_dn, sw_flux_up, &
   call catch_netcdf_error(nf90_put_att(ncid, varid(rshr), "standard_name", "shortwave_heating_rate_in_air"))
   call catch_netcdf_error(nf90_put_att(ncid, varid(rshr), "units", "K day-1"))
   call catch_netcdf_error(nf90_put_att(ncid, varid(rshr), "variable_id", "rshr"))
-  call switch_col_and_z_3d(sw_heating_rate, buffer3d)
+  call switch_col_and_z_3d(sw_heating_rate, buffer3d, nexp)
   call catch_netcdf_error(nf90_put_var(ncid, varid(rshr), buffer3d))
 
   call catch_netcdf_error(nf90_def_var(ncid, "tlev", nf90_float, (/dimid(level), dimid(site), dimid(expt)/), varid(tlev)))
@@ -776,7 +828,7 @@ subroutine write_output(path, lw_flux_dn, lw_flux_up, sw_flux_dn, sw_flux_up, &
   call catch_netcdf_error(nf90_put_att(ncid, varid(tlev), "standard_name", "air_temperature"))
   call catch_netcdf_error(nf90_put_att(ncid, varid(tlev), "units", "K"))
   call catch_netcdf_error(nf90_put_att(ncid, varid(tlev), "variable_id", "tlev"))
-  call switch_col_and_z_3d(t_lev, buffer3d)
+  call switch_col_and_z_3d(t_lev, buffer3d, nexp)
   call catch_netcdf_error(nf90_put_var(ncid, varid(tlev), buffer3d))
 
   call catch_netcdf_error(nf90_def_var(ncid, "tlay", nf90_float, (/dimid(layer), dimid(site), dimid(expt)/), varid(tlay)))
@@ -787,7 +839,7 @@ subroutine write_output(path, lw_flux_dn, lw_flux_up, sw_flux_dn, sw_flux_up, &
   call catch_netcdf_error(nf90_put_att(ncid, varid(tlay), "standard_name", "air_temperature"))
   call catch_netcdf_error(nf90_put_att(ncid, varid(tlay), "units", "K"))
   call catch_netcdf_error(nf90_put_att(ncid, varid(tlay), "variable_id", "tlay"))
-  call switch_col_and_z_3d(t_lay, buffer3d)
+  call switch_col_and_z_3d(t_lay, buffer3d, nexp)
   call catch_netcdf_error(nf90_put_var(ncid, varid(tlay), buffer3d))
 
   call catch_netcdf_error(nf90_def_var(ncid, "dq", nf90_float, (/dimid(layer), dimid(site)/), varid(dq)))
@@ -798,22 +850,113 @@ subroutine write_output(path, lw_flux_dn, lw_flux_up, sw_flux_dn, sw_flux_up, &
   call catch_netcdf_error(nf90_put_att(ncid, varid(dq), "standard_name", "dynamic_heating_rate"))
   call catch_netcdf_error(nf90_put_att(ncid, varid(dq), "units", "W m-2"))
   call catch_netcdf_error(nf90_put_att(ncid, varid(dq), "variable_id", "dq"))
-  call switch_col_and_z_2d(dynamic_heating_rate, buffer2d)
-  call catch_netcdf_error(nf90_put_var(ncid, varid(dq), buffer2d))
-
-! call catch_netcdf_error(nf90_def_var(ncid, "lat", nf90_float, (/dimid(site)/), varid(lat)))
-! call catch_netcdf_error(nf90_put_att(ncid, varid(lat), "long_name", "ERA-Interim latitude"))
-! call catch_netcdf_error(nf90_put_att(ncid, varid(lat), "units", "degree_north"))
-! call catch_netcdf_error(nf90_put_att(ncid, varid(lat), "standard_name", "latitude"))
-
-
-
-
+  call switch_col_and_z_3d(dynamic_heating_rate, buffer3d)
+  call catch_netcdf_error(nf90_put_var(ncid, varid(dq), buffer3d))
 
   call catch_netcdf_error(nf90_close(ncid))
   deallocate(buffer3d)
-  deallocate(buffer2d)
 end subroutine write_output
+
+
+subroutine read_input(path, dq, ncol, nlay, nexp, t_lay, t_lev)
+
+  character(len=*), intent(in) :: path
+  real(kind=wp), dimension(:,:), allocatable, intent(inout) :: dq
+  integer, intent(in) :: ncol
+  integer, intent(in) :: nlay
+  integer, intent(in) :: nexp
+  real(kind=wp), dimension(:,:,:), allocatable, intent(inout) :: t_lay
+  real(kind=wp), dimension(:,:,:), allocatable, intent(inout) :: t_lev
+
+  real(kind=wp), dimension(:,:), allocatable :: buffer
+  real(kind=wp), dimension(:,:,:), allocatable :: buffer3d
+  integer, dimension(4) :: dimid
+  integer, dimension(3) :: dimidv
+  integer :: i
+  integer :: j
+  integer :: k
+  integer :: ncid
+  integer :: s
+  integer :: varid
+
+  write(output_unit, *) "Restarting from file "//trim(path)//"."
+  call catch_netcdf_error(nf90_open(trim(path), nf90_nowrite, ncid))
+  call catch_netcdf_error(nf90_inq_dimid(ncid, "site", dimid(1)))
+  call catch_netcdf_error(nf90_inquire_dimension(ncid, dimid(1), len=s))
+  if (s .ne. ncol) then
+    call stop_on_err("number of columns in restart file is incorrect.")
+  endif
+  call catch_netcdf_error(nf90_inq_dimid(ncid, "layer", dimid(2)))
+  call catch_netcdf_error(nf90_inquire_dimension(ncid, dimid(2), len=s))
+  if (s .ne. nlay) then
+    call stop_on_err("number of layers in restart file is incorrect.")
+  endif
+  call catch_netcdf_error(nf90_inq_dimid(ncid, "level", dimid(3)))
+  call catch_netcdf_error(nf90_inquire_dimension(ncid, dimid(3), len=s))
+  if (s .ne. nlay+1) then
+    call stop_on_err("number of levels in restart file is incorrect.")
+  endif
+  call catch_netcdf_error(nf90_inq_dimid(ncid, "nexpt", dimid(4)))
+  call catch_netcdf_error(nf90_inquire_dimension(ncid, dimid(4), len=s))
+  if (s .ne. nexp) then
+    call stop_on_err("number of experiments in restart file is incorrect.")
+  endif
+
+  allocate(buffer(nlay, ncol))
+  call catch_netcdf_error(nf90_inq_varid(ncid, "dq", varid))
+  call catch_netcdf_error(nf90_inquire_variable(ncid, varid, dimids=dimidv(1:2)))
+  if (dimidv(1) .ne. dimid(2) .or. dimidv(2) .ne. dimid(1)) then
+    call stop_on_err("dq dimensions in unexpected order.")
+  endif
+  call catch_netcdf_error(nf90_get_var(ncid, varid, buffer))
+  if (allocated(dq)) deallocate(dq)
+  allocate(dq(ncol, nlay))
+  dq(:,:) = 0._wp
+  do i = 1, nlay
+    do j = 1, ncol
+      dq(j,i) = buffer(i,j)
+    enddo
+  enddo
+  deallocate(buffer)
+
+  allocate(buffer3d(nlay, ncol, nexp))
+  call catch_netcdf_error(nf90_inq_varid(ncid, "tlay", varid))
+  call catch_netcdf_error(nf90_inquire_variable(ncid, varid, dimids=dimidv(1:3)))
+  if (dimidv(1) .ne. dimid(2) .or. dimidv(2) .ne. dimid(1) .or. &
+      dimidv(3) .ne. dimid(4)) then
+    call stop_on_err("tlay dimensions in unexpected order.")
+  endif
+  call catch_netcdf_error(nf90_get_var(ncid, varid, buffer3d))
+  if (allocated(t_lay)) deallocate(t_lay)
+  allocate(t_lay(ncol, nlay, nexp))
+  do k = 1, nexp
+    do j = 1, ncol
+      do i = 1, nlay
+        t_lay(j,i,k) = buffer3d(i,j,k)
+      enddo
+    enddo
+  enddo
+  deallocate(buffer3d)
+
+  allocate(buffer3d(nlay+1, ncol, nexp))
+  call catch_netcdf_error(nf90_inq_varid(ncid, "tlev", varid))
+  call catch_netcdf_error(nf90_inquire_variable(ncid, varid, dimids=dimidv(1:3)))
+  if (dimidv(1) .ne. dimid(3) .or. dimidv(2) .ne. dimid(1) .or. &
+      dimidv(3) .ne. dimid(4)) then
+    call stop_on_err("tlev dimensions in unexpected order.")
+  endif
+  call catch_netcdf_error(nf90_get_var(ncid, varid, buffer3d))
+  if (allocated(t_lev)) deallocate(t_lev)
+  allocate(t_lev(ncol, nlay+1, nexp))
+  do k = 1, nexp
+    do j = 1, ncol
+      do i = 1, nlay+1
+        t_lev(j,i,k) = buffer3d(i,j,k)
+      enddo
+    enddo
+  enddo
+  deallocate(buffer3d)
+end subroutine read_input
 
 
 end program stratospheric_adjustments

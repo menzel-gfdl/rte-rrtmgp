@@ -2,14 +2,15 @@
 # Intel Fortran 18
 #
 # Fortran compiler command
-export FC = ifort
+export FC = mpiifort
+export CXX = mpiicc
 #
 # Fortran compiler flags
 #
 # Optimized
 #
-export FCFLAGS  += -m64 -O3 -g -traceback -assume realloc_lhs -extend-source 132
-export F77FLAGS += -m64 -O3 -g -traceback
+export FCFLAGS  += -m64 -O3 -g -traceback -assume realloc_lhs -extend-source 132 -qopenmp
+export F77FLAGS += -m64 -O3 -g -traceback -qopenmp
 # can add  -qopt-report-phase=vec
 #
 # Debugging

@@ -1,5 +1,5 @@
 -include Makefile.libs
--include ../../build/Makefile.conf.gfortran
+-include ../../build/Makefile.conf.ifort
 CPPFLAGS += -I../../build
 VPATH = ../
 
@@ -8,7 +8,7 @@ VPATH = ../
 	$(FC) $(FCFLAGS) $(CPPFLAGS) -c $<
 
 %: %.o
-	$(FC) $(FCFLAGS) -o $@ $^ ../../build/librte.a ../../build/librrtmgp.a $(LDFLAGS) $(LIBS)
+	$(FC) $(FCFLAGS) -o $@ $^ ../../build/librte.a ../../build/librrtmgp.a $(LDFLAGS) $(LIBS) -lstdc++
 
 #
 # Ancillary codes

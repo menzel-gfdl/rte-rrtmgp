@@ -4,8 +4,7 @@ module mo_gas_optics_gfdl_grtcode
 use, intrinsic :: iso_fortran_env, only: error_unit
 use, intrinsic :: iso_c_binding, only: c_char, c_double, c_int, c_int64_t
 
-use molecular_lines
-use rs_utils
+use grtcode
 
 use mo_gas_concentrations, only: ty_gas_concs
 use mo_gas_optics, only: ty_gas_optics

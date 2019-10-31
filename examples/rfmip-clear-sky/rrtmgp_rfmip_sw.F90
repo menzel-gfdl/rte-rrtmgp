@@ -93,7 +93,7 @@ program rrtmgp_rfmip_sw
   use argparse
   use mo_gas_optics, only: ty_gas_optics
   use mo_gas_optics_gfdl_grtcode, only: ty_gas_optics_gfdl_grtcode
-  use rs_utils, only: rs_set_verbosity
+  use grtcode, only: rs_set_verbosity
 
   implicit none
   ! --------------------------------------------------

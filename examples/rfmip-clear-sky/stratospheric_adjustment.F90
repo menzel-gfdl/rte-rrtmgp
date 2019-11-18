@@ -85,13 +85,38 @@ real(kind=wp) :: dq
 real(kind=wp) :: d_hr
 real(kind=wp) :: lw_hr
 real(kind=wp) :: sw_hr
-real(kind=wp) :: max_hr
-real(kind=wp) :: tolerance
 integer :: num_iterations = 5
 integer :: b
 integer :: i
 integer :: j
 integer :: k
+
+
+enum, bind(c)
+  enumerator :: expt = 1
+  enumerator :: site
+  enumerator :: layer
+  enumerator :: level
+  enumerator :: time
+  enumerator :: num_dims = 5
+end enum
+enum, bind(c)
+  enumerator :: rld = 1
+  enumerator :: rlu
+  enumerator :: rsd
+  enumerator :: rsu
+  enumerator :: rlhr
+  enumerator :: rshr
+  enumerator :: tlevid
+  enumerator :: tlayid
+  enumerator :: num_vars = 8
+end enum
+type :: OutputFile
+  integer :: ncid
+  integer, dimension(num_dims) :: dimid
+  integer, dimension(num_vars) :: varid
+end type
+type(OutputFile), dimension(18) :: output
 
 
 !Parse command line arguments.
@@ -226,6 +251,16 @@ allocate(sfc_alb_spec(nbnd, ncol))
 call stop_on_err(sw_optical_props%alloc_2str(ncol, nlay, sw_k_dist))
 allocate(sw_heating_rate(ncol, nlay, nexp))
 
+!Create output files
+do i = 1, nexp
+  buffer = ""
+  if (i-1 .lt. 10) then
+    write(buffer, '(a,i1,a)') "fluxes_experiment_", i-1, ".nc"
+  else
+    write(buffer, '(a,i2,a)') "fluxes_experiment_", i-1, ".nc"
+  endif
+  call create_output_file(trim(buffer), ncol, nlay+1, output(i))
+enddo
 
 !Calculate present-day longwave heating rates.
 call calculate_lw_fluxes(1, lw_fluxes, lw_flux_up, lw_flux_dn, lw_k_dist, sfc_emis_spec, &
@@ -236,7 +271,6 @@ call calculate_heating_rate(lw_flux_up(:,:,1), lw_flux_dn(:,:,1), p_lev(:,:,1), 
                             stratosphere_starting_index(:,1), stratosphere_ending_index(:,1), &
                             lw_heating_rate(:,:,1))
 
-
 !Calculate present-day shortwave heating rates.
 call calculate_sw_fluxes(1, sw_fluxes, sw_flux_up, sw_flux_dn, sw_k_dist, p_lay, p_lev, &
                          t_lay, sw_gas_conc_array, sw_optical_props, toa_flux, ncol, &
@@ -246,7 +280,10 @@ sw_heating_rate(:,:,:) = 0.0
 call calculate_heating_rate(sw_flux_up(:,:,1), sw_flux_dn(:,:,1), p_lev(:,:,1), top_at_1, &
                             stratosphere_starting_index(:,1), stratosphere_ending_index(:,1), &
                             sw_heating_rate(:,:,1))
-
+call write_output(output(1), lw_flux_dn(:,:,1), lw_flux_up(:,:,1), sw_flux_dn(:,:,1), &
+                  sw_flux_up(:,:,1), lw_heating_rate(:,:,1), sw_heating_rate(:,:,1), &
+                  t_lev(:,:,1), t_lay(:,:,1), 1)
+call catch_netcdf_error(nf90_close(output(1)%ncid))
 
 !Calculate the "dynamic" heating rate.
 allocate(dynamic_heating_rate(ncol, nlay))
@@ -257,11 +294,8 @@ do i = 1, ncol
   enddo
 enddo
 
-
-tolerance = 0.01_wp
 num_iterations = 250
 do i = 1, num_iterations
-  max_hr = 0._wp
   write(output_unit, "(a,i0.3,a,i0.3)") "Executing iteration ", i, "/", num_iterations
   do b = 2, nexp
 
@@ -286,9 +320,6 @@ do i = 1, num_iterations
     do j = 1, ncol
       do k = stratosphere_starting_index(j,b), stratosphere_ending_index(j,b)
         dq = dynamic_heating_rate(j,k) + lw_heating_rate(j,k,b) + sw_heating_rate(j,k,b)
-        if (abs(dq) .gt. max_hr) then
-          max_hr = abs(dq)
-        endif
         t_lay(j,k,b) = t_lay(j,k,b) + dq
       enddo
 
@@ -309,18 +340,17 @@ do i = 1, num_iterations
         t_lev(j,k+1,b) = t_lev(j,k+1,b) + lw_hr + sw_hr + d_hr
       enddo
     enddo
+
+    !Write out data.
+    call write_output(output(b), lw_flux_dn(:,:,b), lw_flux_up(:,:,b), sw_flux_dn(:,:,b), &
+                      sw_flux_up(:,:,b), lw_heating_rate(:,:,b), sw_heating_rate(:,:,b), &
+                      t_lev(:,:,b), t_lay(:,:,b), i)
   enddo
-  write(output_unit, "(a,f)") "Maximum heating rate =", max_hr
-  if (max_hr .lt. tolerance) then
-    exit
-  endif
 enddo
 
-!Write data to the output file.
-call write_output("dynamic_adjustments.nc", lw_flux_dn, lw_flux_up, sw_flux_dn, sw_flux_up, &
-                  lw_heating_rate, sw_heating_rate, t_lev, t_lay)
-
-
+do i = 2, nexp
+  call catch_netcdf_error(nf90_close(output(i)%ncid))
+enddo
 
 !Free memory.
 deallocate(p_lay)
@@ -557,180 +587,130 @@ subroutine catch_netcdf_error(code)
 end subroutine catch_netcdf_error
 
 
-subroutine switch_col_and_z_3d(in_var, out_var)
+subroutine switch_col_and_z_2d(in_var, out_var)
 
-  real(kind=wp), dimension(:,:,:), intent(in) :: in_var
-  real(kind=wp), dimension(:,:,:), allocatable, intent(inout) :: out_var
+  real(kind=wp), dimension(:,:), intent(in) :: in_var
+  real(kind=wp), dimension(:,:), allocatable, intent(inout) :: out_var
 
   integer :: i
   integer :: j
-  integer :: k
 
   if (allocated(out_var)) deallocate(out_var)
-  allocate(out_var(size(in_var, 2), size(in_var, 1), size(in_var, 3)))
-  do k = 1, size(in_var, 3)
-    do j = 1, size(in_var, 1)
-      do i = 1, size(in_var, 2)
-        out_var(i,j,k) = in_var(j,i,k)
-      enddo
+  allocate(out_var(size(in_var, 2), size(in_var, 1)))
+  do j = 1, size(in_var, 1)
+    do i = 1, size(in_var, 2)
+      out_var(i,j) = in_var(j,i)
     enddo
   enddo
-end subroutine switch_col_and_z_3d
+end subroutine switch_col_and_z_2d
 
 
-subroutine write_output(path, lw_flux_dn, lw_flux_up, sw_flux_dn, sw_flux_up, &
-                        lw_heating_rate, sw_heating_rate, t_lev, t_lay)
+function add_variable(ncid, name, standard_name, units, dimid) result(varid)
+
+  integer, intent(in) :: ncid
+  character(len=*), intent(in) :: name
+  character(len=*), intent(in) :: standard_name
+  character(len=*), intent(in) :: units
+  integer, dimension(:), intent(in) :: dimid
+  integer :: varid
+
+  call catch_netcdf_error(nf90_def_var(ncid, trim(name), nf90_double, dimid, varid))
+  call catch_netcdf_error(nf90_put_att(ncid, varid, "units", trim(units)))
+  call catch_netcdf_error(nf90_put_att(ncid, varid, "standard_name", trim(standard_name)))
+end function add_variable
+
+
+subroutine create_output_file(path, ncol, nlev, output)
 
   character(len=*), intent(in) :: path
-  real(kind=wp), dimension(:,:,:), intent(in) :: lw_flux_dn
-  real(kind=wp), dimension(:,:,:), intent(in) :: lw_flux_up
-  real(kind=wp), dimension(:,:,:), intent(in) :: sw_flux_dn
-  real(kind=wp), dimension(:,:,:), intent(in) :: sw_flux_up
-  real(kind=wp), dimension(:,:,:), intent(in) :: lw_heating_rate
-  real(kind=wp), dimension(:,:,:), intent(in) :: sw_heating_rate
-  real(kind=wp), dimension(:,:,:), intent(in) :: t_lev
-  real(kind=wp), dimension(:,:,:), intent(in) :: t_lay
+  integer, intent(in) :: ncol
+  integer, intent(in) :: nlev
+  type(OutputFile), intent(inout) :: output
 
-  integer :: ncid
-  enum, bind(c)
-    enumerator :: expt = 1
-    enumerator :: site
-    enumerator :: layer
-    enumerator :: level
-    enumerator :: num_dims = 4
-  end enum
-  integer, dimension(num_dims) :: dimid
-  enum, bind(c)
-    enumerator :: lat = 1
-    enumerator :: lon
-    enumerator :: time
-    enumerator :: plev
-    enumerator :: w
-    enumerator :: rld
-    enumerator :: rlu
-    enumerator :: rsd
-    enumerator :: rsu
-    enumerator :: rlhr
-    enumerator :: rshr
-    enumerator :: tlev
-    enumerator :: tlay
-    enumerator :: num_vars = 13
-  end enum
-  integer, dimension(num_vars) :: varid
-  real(kind=wp), dimension(:,:,:), allocatable :: buffer3d
-  integer :: nexp
+  integer, dimension(4) :: dimid
+
+  call catch_netcdf_error(nf90_create(path, ior(nf90_clobber, nf90_netcdf4), output%ncid))
+  call catch_netcdf_error(nf90_def_dim(output%ncid, "expt", 1, output%dimid(expt)))
+  call catch_netcdf_error(nf90_def_dim(output%ncid, "site", ncol, output%dimid(site)))
+  call catch_netcdf_error(nf90_def_dim(output%ncid, "layer", nlev-1, output%dimid(layer)))
+  call catch_netcdf_error(nf90_def_dim(output%ncid, "level", nlev, output%dimid(level)))
+  call catch_netcdf_error(nf90_def_dim(output%ncid, "time", nf90_unlimited, output%dimid(time)))
+  dimid(1) = output%dimid(level)
+  dimid(2) = output%dimid(site)
+  dimid(3) = output%dimid(expt)
+  dimid(4) = output%dimid(time)
+  output%varid(rlu) = add_variable(output%ncid, "rlu", "upwelling_longwave_flux_in_air", &
+                                   "W m-2", dimid)
+  output%varid(rld) = add_variable(output%ncid, "rld", "downwelling_longwave_flux_in_air", &
+                                   "W m-2", dimid)
+  output%varid(rsu) = add_variable(output%ncid, "rsu", "upwelling_shortwave_flux_in_air", &
+                                   "W m-2", dimid)
+  output%varid(rsd) = add_variable(output%ncid, "rsd", "downwelling_shortwave_flux_in_air", &
+                                   "W m-2", dimid)
+  output%varid(tlevid) = add_variable(output%ncid, "tlev", "level_temperature", "K", dimid)
+  dimid(1) = output%dimid(layer)
+  output%varid(rlhr) = add_variable(output%ncid, "rlhr", "longwave_heating_rate_in_air", &
+                                    "K day-1", dimid)
+  output%varid(rshr) = add_variable(output%ncid, "rshr", "shortwave_heating_rate_in_air", &
+                                    "K day-1", dimid)
+  output%varid(tlayid) = add_variable(output%ncid, "tlay", "layer_temperature", "K", dimid)
+end subroutine create_output_file
+
+
+subroutine write_output(output, lw_flux_dn, lw_flux_up, sw_flux_dn, sw_flux_up, &
+                        lw_heating_rate, sw_heating_rate, t_lev, t_lay, iter)
+
+  type(OutputFile), intent(in) :: output
+  real(kind=wp), dimension(:,:), intent(in) :: lw_flux_dn
+  real(kind=wp), dimension(:,:), intent(in) :: lw_flux_up
+  real(kind=wp), dimension(:,:), intent(in) :: sw_flux_dn
+  real(kind=wp), dimension(:,:), intent(in) :: sw_flux_up
+  real(kind=wp), dimension(:,:), intent(in) :: lw_heating_rate
+  real(kind=wp), dimension(:,:), intent(in) :: sw_heating_rate
+  real(kind=wp), dimension(:,:), intent(in) :: t_lev
+  real(kind=wp), dimension(:,:), intent(in) :: t_lay
+  integer, intent(in) :: iter
+
+  real(kind=wp), dimension(:,:), allocatable :: buffer
+  integer, dimension(4) :: start
+  integer, dimension(4) :: counts
   integer :: ncol
   integer :: nlev
 
-  nexp = size(lw_flux_dn, 3)
   ncol = size(lw_flux_dn, 1)
   nlev = size(lw_flux_dn, 2)
-  call catch_netcdf_error(nf90_create(path, ior(nf90_clobber, nf90_netcdf4), ncid))
-  call catch_netcdf_error(nf90_def_dim(ncid, "nexpt", nexp, dimid(expt)))
-  call catch_netcdf_error(nf90_def_dim(ncid, "site", ncol, dimid(site)))
-  call catch_netcdf_error(nf90_def_dim(ncid, "layer", nlev-1, dimid(layer)))
-  call catch_netcdf_error(nf90_def_dim(ncid, "level", nlev, dimid(level)))
-
-  call catch_netcdf_error(nf90_def_var(ncid, "rld", nf90_float, (/dimid(level), dimid(site), dimid(expt)/), varid(rld)))
-  call catch_netcdf_error(nf90_def_var_fill(ncid, varid(rld), 0, -1000._real32))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rld), "cell_methods", "area: point"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rld), "coordinates", "lon lat time"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rld), "missing_value", -1000._real32))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rld), "standard_name", "downwelling_longwave_flux_in_air"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rld), "units", "W m-2"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rld), "variable_id", "rld"))
-  call switch_col_and_z_3d(lw_flux_dn, buffer3d)
-  call catch_netcdf_error(nf90_put_var(ncid, varid(rld), buffer3d))
-
-  call catch_netcdf_error(nf90_def_var(ncid, "rlu", nf90_float, (/dimid(level), dimid(site), dimid(expt)/), varid(rlu)))
-  call catch_netcdf_error(nf90_def_var_fill(ncid, varid(rlu), 0, -1000._real32))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rlu), "cell_methods", "area: point"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rlu), "coordinates", "lon lat time"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rlu), "missing_value", -1000._real32))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rlu), "standard_name", "upwelling_longwave_flux_in_air"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rlu), "units", "W m-2"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rlu), "variable_id", "rlu"))
-  call switch_col_and_z_3d(lw_flux_up, buffer3d)
-  call catch_netcdf_error(nf90_put_var(ncid, varid(rlu), buffer3d))
-
-  call catch_netcdf_error(nf90_def_var(ncid, "rsd", nf90_float, (/dimid(level), dimid(site), dimid(expt)/), varid(rsd)))
-  call catch_netcdf_error(nf90_def_var_fill(ncid, varid(rsd), 0, -1000._real32))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rsd), "cell_methods", "area: point"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rsd), "coordinates", "lon lat time"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rsd), "missing_value", -1000._real32))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rsd), "standard_name", "downwelling_shortwave_flux_in_air"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rsd), "units", "W m-2"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rsd), "variable_id", "rsd"))
-  call switch_col_and_z_3d(sw_flux_dn, buffer3d)
-  call catch_netcdf_error(nf90_put_var(ncid, varid(rsd), buffer3d))
-
-  call catch_netcdf_error(nf90_def_var(ncid, "rsu", nf90_float, (/dimid(level), dimid(site), dimid(expt)/), varid(rsu)))
-  call catch_netcdf_error(nf90_def_var_fill(ncid, varid(rsu), 0, -1000._real32))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rsu), "cell_methods", "area: point"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rsu), "coordinates", "lon lat time"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rsu), "missing_value", -1000._real32))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rsu), "standard_name", "upwelling_shortave_flux_in_air"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rsu), "units", "W m-2"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rsu), "variable_id", "rsu"))
-  call switch_col_and_z_3d(sw_flux_up, buffer3d)
-  call catch_netcdf_error(nf90_put_var(ncid, varid(rsu), buffer3d))
-
-  call catch_netcdf_error(nf90_def_var(ncid, "rlhr", nf90_float, (/dimid(layer), dimid(site), dimid(expt)/), varid(rlhr)))
-  call catch_netcdf_error(nf90_def_var_fill(ncid, varid(rlhr), 0, -1000._real32))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rlhr), "cell_methods", "area: point"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rlhr), "coordinates", "lon lat time"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rlhr), "missing_value", -1000._real32))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rlhr), "standard_name", "longwave_heating_rate_in_air"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rlhr), "units", "K day-1"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rlhr), "variable_id", "rlhr"))
-  call switch_col_and_z_3d(lw_heating_rate, buffer3d)
-  call catch_netcdf_error(nf90_put_var(ncid, varid(rlhr), buffer3d))
-
-  call catch_netcdf_error(nf90_def_var(ncid, "rshr", nf90_float, (/dimid(layer), dimid(site), dimid(expt)/), varid(rshr)))
-  call catch_netcdf_error(nf90_def_var_fill(ncid, varid(rshr), 0, -1000._real32))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rshr), "cell_methods", "area: point"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rshr), "coordinates", "lon lat time"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rshr), "missing_value", -1000._real32))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rshr), "standard_name", "shortwave_heating_rate_in_air"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rshr), "units", "K day-1"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(rshr), "variable_id", "rshr"))
-  call switch_col_and_z_3d(sw_heating_rate, buffer3d)
-  call catch_netcdf_error(nf90_put_var(ncid, varid(rshr), buffer3d))
-
-  call catch_netcdf_error(nf90_def_var(ncid, "tlev", nf90_float, (/dimid(level), dimid(site), dimid(expt)/), varid(tlev)))
-  call catch_netcdf_error(nf90_def_var_fill(ncid, varid(tlev), 0, -1000._real32))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(tlev), "cell_methods", "area: point"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(tlev), "coordinates", "lon lat time"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(tlev), "missing_value", -1000._real32))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(tlev), "standard_name", "air_temperature"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(tlev), "units", "K"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(tlev), "variable_id", "tlev"))
-  call switch_col_and_z_3d(t_lev, buffer3d)
-  call catch_netcdf_error(nf90_put_var(ncid, varid(tlev), buffer3d))
-
-  call catch_netcdf_error(nf90_def_var(ncid, "tlay", nf90_float, (/dimid(layer), dimid(site), dimid(expt)/), varid(tlay)))
-  call catch_netcdf_error(nf90_def_var_fill(ncid, varid(tlay), 0, -1000._real32))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(tlay), "cell_methods", "area: point"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(tlay), "coordinates", "lon lat time"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(tlay), "missing_value", -1000._real32))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(tlay), "standard_name", "air_temperature"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(tlay), "units", "K"))
-  call catch_netcdf_error(nf90_put_att(ncid, varid(tlay), "variable_id", "tlay"))
-  call switch_col_and_z_3d(t_lay, buffer3d)
-  call catch_netcdf_error(nf90_put_var(ncid, varid(tlay), buffer3d))
-
-
-! call catch_netcdf_error(nf90_def_var(ncid, "lat", nf90_float, (/dimid(site)/), varid(lat)))
-! call catch_netcdf_error(nf90_put_att(ncid, varid(lat), "long_name", "ERA-Interim latitude"))
-! call catch_netcdf_error(nf90_put_att(ncid, varid(lat), "units", "degree_north"))
-! call catch_netcdf_error(nf90_put_att(ncid, varid(lat), "standard_name", "latitude"))
-
-
-
-
-
-  call catch_netcdf_error(nf90_close(ncid))
-  deallocate(buffer3d)
+  start(1:3) = 1
+  start(4) = iter
+  counts(1) = nlev
+  counts(2) = ncol
+  counts(3) = 1
+  counts(4) = 1
+  call switch_col_and_z_2d(lw_flux_dn, buffer)
+  call catch_netcdf_error(nf90_put_var(output%ncid, output%varid(rld), buffer, &
+                                       start=start, count=counts))
+  call switch_col_and_z_2d(lw_flux_up, buffer)
+  call catch_netcdf_error(nf90_put_var(output%ncid, output%varid(rlu), buffer, &
+                                       start=start, count=counts))
+  call switch_col_and_z_2d(sw_flux_dn, buffer)
+  call catch_netcdf_error(nf90_put_var(output%ncid, output%varid(rsd), buffer, &
+                                       start=start, count=counts))
+  call switch_col_and_z_2d(sw_flux_up, buffer)
+  call catch_netcdf_error(nf90_put_var(output%ncid, output%varid(rsu), buffer, &
+                                       start=start, count=counts))
+  call switch_col_and_z_2d(t_lev, buffer)
+  call catch_netcdf_error(nf90_put_var(output%ncid, output%varid(tlevid), buffer, &
+                                       start=start, count=counts))
+  counts(1) = nlev - 1
+  call switch_col_and_z_2d(lw_heating_rate, buffer)
+  call catch_netcdf_error(nf90_put_var(output%ncid, output%varid(rlhr), buffer, &
+                                       start=start, count=counts))
+  call switch_col_and_z_2d(sw_heating_rate, buffer)
+  call catch_netcdf_error(nf90_put_var(output%ncid, output%varid(rshr), buffer, &
+                                       start=start, count=counts))
+  call switch_col_and_z_2d(t_lay, buffer)
+  call catch_netcdf_error(nf90_put_var(output%ncid, output%varid(tlayid), buffer, &
+                                       start=start, count=counts))
+  deallocate(buffer)
 end subroutine write_output
 
 

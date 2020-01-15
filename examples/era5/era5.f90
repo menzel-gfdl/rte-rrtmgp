@@ -321,12 +321,14 @@ subroutine create_atmosphere(atm, parser)
     character(len=8) :: flag
     character(len=32) :: name
     logical :: use_input
+    real(kind=real64) :: mass
   end type MoleculeMeta_t
 
   real(kind=real64), dimension(:,:,:,:), allocatable :: abundance
   real(kind=real64), dimension(:,:,:), allocatable :: albedo
   character(len=valuelen) :: buffer
   integer, dimension(4) :: counts
+  real(kind=real64), parameter :: dry_air_mass = 28.9647_real64
   real(kind=real64), parameter :: from_ppmv = 1.e-6_real64
   integer :: err
   integer :: global_nlat
@@ -516,10 +518,12 @@ subroutine create_atmosphere(atm, parser)
   molecules(1)%flag = "-H2O"
   molecules(1)%name = "q"
   molecules(1)%use_input = .false.
+  molecules(1)%mass = 18.02_real64
   molecules(2)%id = o3
   molecules(2)%flag = "-O3"
   molecules(2)%name = "o3"
   molecules(2)%use_input = .false.
+  molecules(2)%mass = 47.997_real64
   molecules(3)%id = co2
   molecules(3)%flag = "-CO2"
   molecules(3)%name = "co2"
@@ -551,6 +555,7 @@ subroutine create_atmosphere(atm, parser)
         start(1) = x_start; start(2) = y_start; start(3) = z_start; start(4) = t_start;
         counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_levels; counts(4) = atm%num_times;
         call variable_data(ncid, trim(molecules(i)%name), abundance, start, counts)
+        abundance(:,:,:,:) = (dry_air_mass/molecules(i)%mass)*abundance(:,:,:,:)
         call xyzt_to_bznt(atm%ppmv(:,:,:,:,atm%num_molecules), abundance)
         deallocate(abundance)
       endif

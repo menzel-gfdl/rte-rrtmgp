@@ -51,6 +51,7 @@ real(kind=real64), dimension(:), allocatable :: zenith
 parser = create_parser()
 call add_argument(parser, "lw_kdist_file", "Longwave k-distribution file.")
 call add_argument(parser, "sw_kdist_file", "Shortwave k-distribution file.")
+call add_argument(parser, "-a", "Index of last infrared band", .true., "--last-ir-band")
 call add_argument(parser, "-o", "Output file", .true., "--output")
 call create_atmosphere(atm, parser)
 
@@ -117,7 +118,12 @@ allocate(zenith(block_size))
 num_sw_bands = sw_k%get_nband()
 allocate(diffuse_albedo(num_sw_bands, block_size))
 allocate(direct_albedo(num_sw_bands, block_size))
-infrared_cutoff = num_sw_bands/2
+call get_argument(parser, "-a", buffer)
+if (trim(buffer) .eq. "not present") then
+  infrared_cutoff = num_sw_bands/2 + 1
+else
+  read(buffer, *) infrared_cutoff
+endif
 
 !Initialize fluxes.
 allocate(lw_fluxes%flux_dn(block_size, atm%num_levels))

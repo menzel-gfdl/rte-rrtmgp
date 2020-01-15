@@ -23,8 +23,14 @@ type, public :: Atmosphere_t
   integer :: num_molecules !< Number of molecules.
   integer :: num_times !< Number of times.
   real(kind=real64), dimension(:,:,:,:,:), allocatable :: ppmv !< Molecular abundancee (block_size, level, num_blocks, time, molecule).
+  real(kind=real64), dimension(:,:,:), allocatable :: solar_zenith_angle !< Solar zenith angle [degrees] (block_size, num_blocks, time).
+  real(kind=real64), dimension(:,:,:), allocatable :: surface_albedo_diffuse_ir !< Surface albedo for infrared diffuse beam (block_size, num_blocks, time).
+  real(kind=real64), dimension(:,:,:), allocatable :: surface_albedo_diffuse_uv !< Surface albedo for ultraviolet diffuse beam (block_size, num_blocks, time).
+  real(kind=real64), dimension(:,:,:), allocatable :: surface_albedo_direct_ir !< Surface albedo for infrared direct beam (block_size, num_blocks, time).
+  real(kind=real64), dimension(:,:,:), allocatable :: surface_albedo_direct_uv !< Surface albedo for ultraviolet direct beam (block_size, num_blocks, time).
   real(kind=real64), dimension(:,:,:), allocatable :: surface_temperature !< Surface temperature [K] (block_size, num_blocks, time).
   real(kind=real64), dimension(:), allocatable :: time !< Time [hours].
+  real(kind=real64), dimension(:), allocatable :: total_solar_irradiance !< Total solar irradiance [W m-2] (time).
 end type Atmosphere_t
 
 
@@ -45,7 +51,8 @@ integer, parameter, public :: o3 = 2
 integer, parameter, public :: co2 = 3
 integer, parameter, public :: n2o = 4
 integer, parameter, public :: ch4 = 5
-integer, parameter, public :: num_molecules = 5
+integer, parameter, public :: o2 = 6
+integer, parameter, public :: num_molecules = 6
 integer, parameter, public :: rld = 5
 integer, parameter, public :: rlu = 6
 integer, parameter, public :: rsd = 7
@@ -317,29 +324,40 @@ subroutine create_atmosphere(atm, parser)
   end type MoleculeMeta_t
 
   real(kind=real64), dimension(:,:,:,:), allocatable :: abundance
+  real(kind=real64), dimension(:,:,:), allocatable :: albedo
   character(len=valuelen) :: buffer
   integer, dimension(4) :: counts
   real(kind=real64), parameter :: from_ppmv = 1.e-6_real64
   integer :: err
+  integer :: global_nlat
+  integer :: global_nlon
   integer :: i
   real(kind=real64) :: input_abundance
+  real(kind=real64), dimension(:,:,:), allocatable :: irradiance
   integer :: j
   integer :: k
+  real(kind=real64), dimension(:), allocatable :: latitude
   integer :: m
   real(kind=real64), parameter :: mb_to_pa = 100._real64
+  real(kind=real64) :: mean_irradiance
   integer :: ncid
+  real(kind=real64), parameter :: pi = 3.14159265359_real64
   real(kind=real64), dimension(:,:,:,:), allocatable :: pressure
+  real(kind=real64), parameter :: seconds_per_day = 86400._real64
   integer, dimension(4) :: start
   real(kind=real64), dimension(:,:,:), allocatable :: surface_temperature
   integer :: t_start
   integer :: t_stop
   real(kind=real64), dimension(:,:,:,:), allocatable :: temperature
+  real(kind=real64) :: total_weight
+  real(kind=real64), dimension(:), allocatable :: weights
   integer :: x_start
   integer :: x_stop
   integer :: y_start
   integer :: y_stop
   integer :: z_start
   integer :: z_stop
+  real(kind=real64), dimension(:,:,:), allocatable :: zenith
   type(MoleculeMeta_t), dimension(num_molecules) :: molecules
 
   !Add/parse command line arguments.
@@ -350,6 +368,7 @@ subroutine create_atmosphere(atm, parser)
   call add_argument(parser, "-CO2", "CO2 abundance [ppmv].", .true.)
   call add_argument(parser, "-H2O", "Include H2O.", .false.)
   call add_argument(parser, "-N2O", "N2O abundance [ppmv].", .true.)
+  call add_argument(parser, "-O2", "O2 abundance [ppmv].", .true.)
   call add_argument(parser, "-O3", "Include O3.", .false.)
   call add_argument(parser, "-t", "Starting time index.", .true., "--time-lower-bound")
   call add_argument(parser, "-T", "Ending time index.", .true., "--Time-upper-bound")
@@ -513,6 +532,10 @@ subroutine create_atmosphere(atm, parser)
   molecules(5)%flag = "-CH4"
   molecules(5)%name = "ch4"
   molecules(5)%use_input = .true.
+  molecules(6)%id = o2
+  molecules(6)%flag = "-O2"
+  molecules(6)%name = "o2"
+  molecules(6)%use_input = .true.
   allocate(atm%molecules(num_molecules))
   atm%num_molecules = 0
   allocate(atm%ppmv(block_size, atm%num_layers, num_blocks, atm%num_times, num_molecules))
@@ -548,6 +571,63 @@ subroutine create_atmosphere(atm, parser)
   allocate(atm%surface_temperature(block_size, num_blocks, atm%num_times))
   call xyt_to_bnt(atm%surface_temperature, surface_temperature)
   deallocate(surface_temperature)
+
+  !Calculate the solar zenith angle and mean solar irradiance.
+  global_nlon = dimension_length(ncid, "lon")
+  global_nlat = dimension_length(ncid, "lat")
+  call variable_data(ncid, "lat", latitude)
+  allocate(weights(global_nlat))
+  weights(:) = cos(2._real64*pi*latitude(:)/360._real64)
+  total_weight = sum(weights)
+  deallocate(latitude)
+  start(1) = 1; start(2) = 1; start(3) = t_start;
+  counts(1) = global_nlon; counts(2) = global_nlat; counts(3) = atm%num_times;
+  call variable_data(ncid, "tisr", irradiance, start(1:3), counts(1:3))
+  irradiance(:,:,:) = irradiance(:,:,:)/seconds_per_day
+  allocate(atm%total_solar_irradiance(atm%num_times))
+  do i = 1, atm%num_times
+    mean_irradiance = 0._real64
+    do j = 1, global_nlat
+      mean_irradiance = mean_irradiance + sum(irradiance(:,j,i))*weights(j)
+    enddo
+    atm%total_solar_irradiance(i) = 4._real64*mean_irradiance/(global_nlon*total_weight)
+  enddo
+  deallocate(weights)
+  allocate(zenith(nlon, nlat, atm%num_times))
+  do k = 1, atm%num_times
+    do j = 1, nlat
+      do i = 1, nlon
+        zenith(i,j,k) = irradiance(i+x_start-1,j+y_start-1,k)/atm%total_solar_irradiance(k)
+      enddo
+    enddo
+  enddo
+  deallocate(irradiance)
+  allocate(atm%solar_zenith_angle(block_size, num_blocks, atm%num_times))
+  call xyt_to_bnt(atm%solar_zenith_angle, zenith)
+
+  !Albedos.
+  start(1) = x_start; start(2) = y_start; start(3) = t_start;
+  counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_times;
+  call variable_data(ncid, "alnid", albedo, start(1:3), counts(1:3))
+  allocate(atm%surface_albedo_diffuse_ir(block_size, num_blocks, atm%num_times))
+  call xyt_to_bnt(atm%surface_albedo_diffuse_ir, albedo)
+  deallocate(albedo)
+  call variable_data(ncid, "aluvd", albedo, start(1:3), counts(1:3))
+  allocate(atm%surface_albedo_diffuse_uv(block_size, num_blocks, atm%num_times))
+  call xyt_to_bnt(atm%surface_albedo_diffuse_uv, albedo)
+  deallocate(albedo)
+  call variable_data(ncid, "alnip", albedo, start(1:3), counts(1:3))
+  allocate(atm%surface_albedo_direct_ir(block_size, num_blocks, atm%num_times))
+  call xyt_to_bnt(atm%surface_albedo_direct_ir, albedo)
+  deallocate(albedo)
+  call variable_data(ncid, "aluvp", albedo, start(1:3), counts(1:3))
+  allocate(atm%surface_albedo_direct_uv(block_size, num_blocks, atm%num_times))
+  call xyt_to_bnt(atm%surface_albedo_direct_uv, albedo)
+  deallocate(albedo)
+
+  !Close the single file.
+  err = nf90_close(ncid)
+  call netcdf_catch(err)
 end subroutine create_atmosphere
 
 
@@ -565,8 +645,14 @@ subroutine destroy_atmosphere(atm)
   if (allocated(atm%longitude)) deallocate(atm%longitude)
   if (allocated(atm%molecules)) deallocate(atm%molecules)
   if (allocated(atm%ppmv)) deallocate(atm%ppmv)
+  if (allocated(atm%solar_zenith_angle)) deallocate(atm%solar_zenith_angle)
+  if (allocated(atm%surface_albedo_diffuse_ir)) deallocate(atm%surface_albedo_diffuse_ir)
+  if (allocated(atm%surface_albedo_diffuse_uv)) deallocate(atm%surface_albedo_diffuse_uv)
+  if (allocated(atm%surface_albedo_direct_ir)) deallocate(atm%surface_albedo_direct_ir)
+  if (allocated(atm%surface_albedo_direct_uv)) deallocate(atm%surface_albedo_direct_uv)
   if (allocated(atm%surface_temperature)) deallocate(atm%surface_temperature)
   if (allocated(atm%time)) deallocate(atm%time)
+  if (allocated(atm%total_solar_irradiance)) deallocate(atm%total_solar_irradiance)
 end subroutine destroy_atmosphere
 
 
@@ -646,8 +732,8 @@ subroutine create_flux_file(output, filepath, atm)
   call netcdf_catch(error)
   call add_variable(output, output%dimid, rld, "rld", "downwelling_longwave_flux_in_air", "W m-2")
   call add_variable(output, output%dimid, rlu, "rlu", "upwelling_longwave_flux_in_air", "W m-2")
-  call add_variable(output, output%dimid, rsd, "rsd", "downwelling_shortwave_flux_in_air", "W m-2", 0._real64)
-  call add_variable(output, output%dimid, rsu, "rsu", "upwelling_shortwave_flux_in_air", "W m-2", 0._real64)
+  call add_variable(output, output%dimid, rsd, "rsd", "downwelling_shortwave_flux_in_air", "W m-2")
+  call add_variable(output, output%dimid, rsu, "rsu", "upwelling_shortwave_flux_in_air", "W m-2")
 
   error = nf90_put_var(output%ncid, lon, atm.longitude)
   call netcdf_catch(error)

@@ -30,8 +30,11 @@ type(ty_fluxes_broadband) :: lw_fluxes
 type(ty_gas_optics_rrtmgp) :: lw_k
 type(ty_optical_props_1scl) :: lw_optics
 integer :: m
+real(kind=real64) :: max_pressure
+real(kind=real64) :: max_temperature
 real(kind=real64), parameter :: min_cos_zenith = tiny(min_cos_zenith)
 real(kind=real64) :: min_pressure
+real(kind=real64) :: min_temperature
 integer :: num_lw_bands
 integer :: num_sw_bands
 integer :: num_sw_gpoints
@@ -77,14 +80,24 @@ call load_and_init(lw_k, trim(buffer), ppmv)
 call get_argument(parser, "sw_kdist_file", buffer)
 call load_and_init(sw_k, trim(buffer), ppmv)
 
-!Adjust small pressures so RRTMGP can run.
+!Adjust small pressures and temperatures so RRTMGP can run.
+max_pressure = min(lw_k%get_press_max(), sw_k%get_press_max())
 min_pressure = max(lw_k%get_press_min(), sw_k%get_press_min())
+max_temperature = min(lw_k%get_temp_max(), sw_k%get_temp_max())
+min_temperature = max(lw_k%get_temp_min(), sw_k%get_temp_min())
 do m = 1, size(atm%level_pressure, 4)
   do k = 1, size(atm%level_pressure, 3)
     do j = 1, size(atm%level_pressure, 2)
       do i = 1, size(atm%level_pressure, 1)
-        if (atm%level_pressure(i,j,k,m) .lt. min_pressure) then
+        if (atm%level_pressure(i,j,k,m) .gt. max_pressure) then
+          atm%level_pressure(i,j,k,m) = max_pressure - epsilon(max_pressure)
+        elseif (atm%level_pressure(i,j,k,m) .lt. min_pressure) then
           atm%level_pressure(i,j,k,m) = min_pressure + epsilon(min_pressure)
+        endif
+        if (atm%level_temperature(i,j,k,m) .gt. max_temperature) then
+          atm%level_temperature(i,j,k,m) = max_temperature - epsilon(max_temperature)
+        elseif (atm%level_temperature(i,j,k,m) .lt. min_temperature) then
+          atm%level_temperature(i,j,k,m) = min_temperature + epsilon(min_temperature)
         endif
       enddo
     enddo

@@ -23,6 +23,7 @@ type, public :: Atmosphere_t
   integer :: num_molecules !< Number of molecules.
   integer :: num_times !< Number of times.
   real(kind=real64), dimension(:,:,:,:,:), allocatable :: ppmv !< Molecular abundancee (block_size, level, num_blocks, time, molecule).
+  real(kind=real64), dimension(:,:,:,:), allocatable :: reference_pressure !< Actual model pressure [mb] (lon, lat, level, time).
   real(kind=real64), dimension(:,:,:), allocatable :: solar_zenith_angle !< Solar zenith angle [degrees] (block_size, num_blocks, time).
   real(kind=real64), dimension(:,:,:), allocatable :: surface_albedo_diffuse_ir !< Surface albedo for infrared diffuse beam (block_size, num_blocks, time).
   real(kind=real64), dimension(:,:,:), allocatable :: surface_albedo_diffuse_uv !< Surface albedo for ultraviolet diffuse beam (block_size, num_blocks, time).
@@ -339,19 +340,24 @@ subroutine create_atmosphere(atm, parser)
   integer :: j
   integer :: k
   real(kind=real64), dimension(:), allocatable :: latitude
+  real(kind=real64), dimension(:,:,:,:), allocatable :: level_pressure
+  real(kind=real64), dimension(:,:,:,:), allocatable :: level_temperature
   integer :: m
   real(kind=real64), parameter :: mb_to_pa = 100._real64
   real(kind=real64) :: mean_irradiance
   integer :: ncid
+  integer :: nlayer
   real(kind=real64), parameter :: pi = 3.14159265359_real64
   real(kind=real64), dimension(:,:,:,:), allocatable :: pressure
   real(kind=real64), parameter :: seconds_per_day = 86400._real64
   integer, dimension(4) :: start
+  real(kind=real64), dimension(:,:,:), allocatable :: surface_pressure
   real(kind=real64), dimension(:,:,:), allocatable :: surface_temperature
   integer :: t_start
   integer :: t_stop
   real(kind=real64), dimension(:,:,:,:), allocatable :: temperature
   real(kind=real64) :: total_weight
+  real(kind=real64), dimension(:,:,:), allocatable :: two_meter_temperature
   real(kind=real64), dimension(:), allocatable :: weights
   integer :: x_start
   integer :: x_stop
@@ -378,12 +384,12 @@ subroutine create_atmosphere(atm, parser)
   call add_argument(parser, "-X", "Ending longitude index.", .true., "--lon-upper-bound")
   call add_argument(parser, "-y", "Starting latitude index.", .true., "--lat-lower-bound")
   call add_argument(parser, "-Y", "Ending latitude index.", .true., "--lat-upper-bound")
-  call add_argument(parser, "-z", "Starting level index.", .true., "--level-lower-bound")
-  call add_argument(parser, "-Z", "Ending level index.", .true., "--level-upper-bound")
+  call add_argument(parser, "-z", "Starting layer index.", .true., "--layer-lower-bound")
+  call add_argument(parser, "-Z", "Ending layer index.", .true., "--layer-upper-bound")
   call parse_args(parser)
 
-  !Open the level input file.
-  call get_argument(parser, "level_file", buffer)
+  !Open the single file.
+  call get_argument(parser, "single_file", buffer)
   err = nf90_open(buffer, NF90_NOWRITE, ncid)
   call netcdf_catch(err)
 
@@ -431,6 +437,14 @@ subroutine create_atmosphere(atm, parser)
   nlat = y_stop - y_start + 1
   atm%num_columns = nlon*nlat;
 
+  !Store axis data so it can be copied to the output file.
+  start(1) = x_start; counts(1) = nlon;
+  call variable_data(ncid, "lon", atm%longitude, start(1:1), counts(1:1))
+  start(1) = y_start; counts(1) = nlat;
+  call variable_data(ncid, "lat", atm%latitude, start(1:1), counts(1:1))
+  start(1) = t_start; counts(1) = atm%num_times;
+  call variable_data(ncid, "time", atm%time, start(1:1), counts(1:1))
+
   !Determine mapping from columns to blocks.
   call get_argument(parser, "-b", buffer)
   if (trim(buffer) .eq. "not present") then
@@ -444,130 +458,6 @@ subroutine create_atmosphere(atm, parser)
     endif
     num_blocks = atm%num_columns/block_size
   endif
-
-  !Determine the number of levels.
-  call get_argument(parser, "-z", buffer)
-  if (trim(buffer) .eq. "not present") then
-    z_start = 1
-  else
-    read(buffer, *) z_start
-  endif
-  call get_argument(parser, "-Z", buffer)
-  if (trim(buffer) .eq. "not present") then
-    z_stop = dimension_length(ncid, "level")
-  else
-    read(buffer, *) z_stop
-  endif
-  nlevel = z_stop - z_start + 1
-  atm%num_levels = nlevel
-  atm%num_layers = atm%num_levels - 1
-
-  !Store axis data so it can be copied to the output file.
-  start(1) = x_start; counts(1) = nlon;
-  call variable_data(ncid, "lon", atm%longitude, start(1:1), counts(1:1))
-  start(1) = y_start; counts(1) = nlat;
-  call variable_data(ncid, "lat", atm%latitude, start(1:1), counts(1:1))
-  start(1) = z_start; counts(1) = atm%num_levels;
-  call variable_data(ncid, "level", atm%level, start(1:1), counts(1:1))
-  start(1) = t_start; counts(1) = atm%num_times;
-  call variable_data(ncid, "time", atm%time, start(1:1), counts(1:1))
-
-  !Pressure.
-  start(1) = x_start; start(2) = y_start; start(3) = z_start; start(4) = t_start;
-  counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_levels; counts(4) = atm%num_times;
-  call variable_data(ncid, "p", pressure, start, counts)
-  allocate(atm%level_pressure(block_size, atm%num_levels, num_blocks, atm%num_times))
-  call xyzt_to_bznt(atm%level_pressure, pressure)
-  deallocate(pressure)
-  atm%level_pressure(:,:,:,:) = mb_to_pa*atm%level_pressure(:,:,:,:)
-  allocate(atm%layer_pressure(block_size, atm%num_layers, num_blocks, atm%num_times))
-  do m = 1, atm%num_times
-    do k = 1, num_blocks
-      do j = 1, atm%num_layers
-        do i = 1, block_size
-          atm%layer_pressure(i,j,k,m) = 0.5_real64*(atm%level_pressure(i,j,k,m) + &
-                                        atm%level_pressure(i,j+1,k,m))
-        enddo
-      enddo
-    enddo
-  enddo
-
-  !Temperature.
-  start(1) = x_start; start(2) = y_start; start(3) = z_start; start(4) = t_start;
-  counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_levels; counts(4) = atm%num_times;
-  call variable_data(ncid, "t", temperature, start, counts)
-  allocate(atm%level_temperature(block_size, atm%num_levels, num_blocks, atm%num_times))
-  call xyzt_to_bznt(atm%level_temperature, temperature)
-  deallocate(temperature)
-  allocate(atm%layer_temperature(block_size, atm%num_layers, num_blocks, atm%num_times))
-  do m = 1, atm%num_times
-    do k = 1, num_blocks
-      do j = 1, atm%num_layers
-        do i = 1, block_size
-          atm%layer_temperature(i,j,k,m) = atm%level_temperature(i,j,k,m) + &
-                                           (atm%level_temperature(i,j+1,k,m) - atm%level_temperature(i,j,k,m))* &
-                                           (atm%layer_pressure(i,j,k,m) - atm%level_pressure(i,j,k,m))/ &
-                                           (atm%level_pressure(i,j+1,k,m) - atm%level_pressure(i,j,k,m))
-        enddo
-      enddo
-    enddo
-  enddo
-
-  !Molecular abundances.
-  molecules(1)%id = h2o
-  molecules(1)%flag = "-H2O"
-  molecules(1)%name = "q"
-  molecules(1)%use_input = .false.
-  molecules(1)%mass = 18.02_real64
-  molecules(2)%id = o3
-  molecules(2)%flag = "-O3"
-  molecules(2)%name = "o3"
-  molecules(2)%use_input = .false.
-  molecules(2)%mass = 47.997_real64
-  molecules(3)%id = co2
-  molecules(3)%flag = "-CO2"
-  molecules(3)%name = "co2"
-  molecules(3)%use_input = .true.
-  molecules(4)%id = n2o
-  molecules(4)%flag = "-N2O"
-  molecules(4)%name = "n2o"
-  molecules(4)%use_input = .true.
-  molecules(5)%id = ch4
-  molecules(5)%flag = "-CH4"
-  molecules(5)%name = "ch4"
-  molecules(5)%use_input = .true.
-  molecules(6)%id = o2
-  molecules(6)%flag = "-O2"
-  molecules(6)%name = "o2"
-  molecules(6)%use_input = .true.
-  allocate(atm%molecules(num_molecules))
-  atm%num_molecules = 0
-  allocate(atm%ppmv(block_size, atm%num_layers, num_blocks, atm%num_times, num_molecules))
-  do i = 1, num_molecules
-    call get_argument(parser, trim(molecules(i)%flag), buffer)
-    if (trim(buffer) .ne. "not present") then
-      atm%num_molecules = atm%num_molecules + 1
-      atm%molecules(atm%num_molecules) = molecules(i)%id
-      if (molecules(i)%use_input) then
-        read(buffer, *) input_abundance
-        atm%ppmv(:,:,:,:,atm%num_molecules) = input_abundance*from_ppmv
-      else
-        start(1) = x_start; start(2) = y_start; start(3) = z_start; start(4) = t_start;
-        counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_levels; counts(4) = atm%num_times;
-        call variable_data(ncid, trim(molecules(i)%name), abundance, start, counts)
-        abundance(:,:,:,:) = (dry_air_mass/molecules(i)%mass)*abundance(:,:,:,:)
-        call xyzt_to_bznt(atm%ppmv(:,:,:,:,atm%num_molecules), abundance)
-        deallocate(abundance)
-      endif
-    endif
-  enddo
-
-  !Close level file and open single file.
-  err = nf90_close(ncid)
-  call netcdf_catch(err)
-  call get_argument(parser, "single_file", buffer)
-  err = nf90_open(buffer, NF90_NOWRITE, ncid)
-  call netcdf_catch(err)
 
   !Surface temperature.
   start(1) = x_start; start(2) = y_start; start(3) = t_start;
@@ -630,7 +520,152 @@ subroutine create_atmosphere(atm, parser)
   call xyt_to_bnt(atm%surface_albedo_direct_uv, albedo)
   deallocate(albedo)
 
-  !Close the single file.
+  !Surface pressure.
+  start(1) = x_start; start(2) = y_start; start(3) = t_start;
+  counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_times;
+  call variable_data(ncid, "sp", surface_pressure, start(1:3), counts(1:3))
+  surface_pressure(:,:,:) = mb_to_pa*surface_pressure(:,:,:)
+
+  !Two meter temperature;
+  start(1) = x_start; start(2) = y_start; start(3) = t_start;
+  counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_times;
+  call variable_data(ncid, "t2m", two_meter_temperature, start(1:3), counts(1:3))
+
+  !Close the single file and open the level file.
+  err = nf90_close(ncid)
+  call netcdf_catch(err)
+  call get_argument(parser, "level_file", buffer)
+  err = nf90_open(buffer, NF90_NOWRITE, ncid)
+  call netcdf_catch(err)
+
+  !Determine the number of layers.
+  call get_argument(parser, "-z", buffer)
+  if (trim(buffer) .eq. "not present") then
+    z_start = 1
+  else
+    read(buffer, *) z_start
+  endif
+  call get_argument(parser, "-Z", buffer)
+  if (trim(buffer) .eq. "not present") then
+    z_stop = dimension_length(ncid, "level")
+  else
+    read(buffer, *) z_stop
+  endif
+  nlayer = z_stop - z_start + 1
+  nlevel = nlayer + 1
+  atm%num_levels = nlevel
+  atm%num_layers = nlayer
+
+  !Store axis data so it can be copied to the output file.
+  allocate(atm%level(atm%num_levels))
+  do i = 1, atm%num_levels
+    atm%level(i) = real(i, kind=real64)
+  enddo
+
+  !Pressure.
+  start(1) = x_start; start(2) = y_start; start(3) = z_start; start(4) = t_start;
+  counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_layers; counts(4) = atm%num_times;
+  call variable_data(ncid, "p", pressure, start, counts)
+  pressure(:,:,:,:) = mb_to_pa*pressure(:,:,:,:)
+  allocate(atm%layer_pressure(block_size, atm%num_layers, num_blocks, atm%num_times))
+  call xyzt_to_bznt(atm%layer_pressure, pressure)
+  allocate(level_pressure(nlon, nlat, atm%num_levels, atm%num_times))
+  level_pressure(:,:,1,:) = pressure(:,:,1,:)*0.5_real64
+  level_pressure(:,:,atm%num_levels,:) = surface_pressure(:,:,:)
+  deallocate(surface_pressure)
+  do m = 1, atm%num_times
+    do k = 2, atm%num_layers
+      do j = 1, nlat
+        do i = 1, nlon
+          level_pressure(i,j,k,m) = 0.5_real64*(pressure(i,j,k-1,m) + pressure(i,j,k,m))
+        enddo
+      enddo
+    enddo
+  enddo
+  allocate(atm%level_pressure(block_size, atm%num_levels, num_blocks, atm%num_times))
+  call xyzt_to_bznt(atm%level_pressure, level_pressure)
+  allocate(atm%reference_pressure(nlon, nlat, atm%num_levels, atm%num_times))
+  atm%reference_pressure(:,:,:,:) = level_pressure(:,:,:,:)/mb_to_pa
+
+  !Temperature.
+  start(1) = x_start; start(2) = y_start; start(3) = z_start; start(4) = t_start;
+  counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_layers; counts(4) = atm%num_times;
+  call variable_data(ncid, "t", temperature, start, counts)
+  allocate(atm%layer_temperature(block_size, atm%num_layers, num_blocks, atm%num_times))
+  call xyzt_to_bznt(atm%layer_temperature, temperature)
+  allocate(level_temperature(nlon, nlat, atm%num_levels, atm%num_times))
+  level_temperature(:,:,1,:) = temperature(:,:,1,:)*0.5_real64
+  level_temperature(:,:,atm%num_levels,:) = two_meter_temperature(:,:,:)
+  deallocate(two_meter_temperature)
+  do m = 1, atm%num_times
+    do k = 2, atm%num_layers
+      do j = 1, nlat
+        do i = 1, nlon
+          level_temperature(i,j,k,m) = temperature(i,j,k-1,m) + &
+                                       (temperature(i,j,k,m) - temperature(i,j,k-1,m))* &
+                                       (level_pressure(i,j,k,m) - pressure(i,j,k-1,m))/ &
+                                       (pressure(i,j,k,m) - pressure(i,j,k-1,m))
+        enddo
+      enddo
+    enddo
+  enddo
+  allocate(atm%level_temperature(block_size, atm%num_levels, num_blocks, atm%num_times))
+  call xyzt_to_bznt(atm%level_temperature, level_temperature)
+  deallocate(pressure)
+  deallocate(level_pressure)
+  deallocate(temperature)
+  deallocate(level_temperature)
+
+  !Molecular abundances.
+  molecules(1)%id = h2o
+  molecules(1)%flag = "-H2O"
+  molecules(1)%name = "q"
+  molecules(1)%use_input = .false.
+  molecules(1)%mass = 18.02_real64
+  molecules(2)%id = o3
+  molecules(2)%flag = "-O3"
+  molecules(2)%name = "o3"
+  molecules(2)%use_input = .false.
+  molecules(2)%mass = 47.997_real64
+  molecules(3)%id = co2
+  molecules(3)%flag = "-CO2"
+  molecules(3)%name = "co2"
+  molecules(3)%use_input = .true.
+  molecules(4)%id = n2o
+  molecules(4)%flag = "-N2O"
+  molecules(4)%name = "n2o"
+  molecules(4)%use_input = .true.
+  molecules(5)%id = ch4
+  molecules(5)%flag = "-CH4"
+  molecules(5)%name = "ch4"
+  molecules(5)%use_input = .true.
+  molecules(6)%id = o2
+  molecules(6)%flag = "-O2"
+  molecules(6)%name = "o2"
+  molecules(6)%use_input = .true.
+  allocate(atm%molecules(num_molecules))
+  atm%num_molecules = 0
+  allocate(atm%ppmv(block_size, atm%num_layers, num_blocks, atm%num_times, num_molecules))
+  do i = 1, num_molecules
+    call get_argument(parser, trim(molecules(i)%flag), buffer)
+    if (trim(buffer) .ne. "not present") then
+      atm%num_molecules = atm%num_molecules + 1
+      atm%molecules(atm%num_molecules) = molecules(i)%id
+      if (molecules(i)%use_input) then
+        read(buffer, *) input_abundance
+        atm%ppmv(:,:,:,:,atm%num_molecules) = input_abundance*from_ppmv
+      else
+        start(1) = x_start; start(2) = y_start; start(3) = z_start; start(4) = t_start;
+        counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_layers; counts(4) = atm%num_times;
+        call variable_data(ncid, trim(molecules(i)%name), abundance, start, counts)
+        abundance(:,:,:,:) = (dry_air_mass/molecules(i)%mass)*abundance(:,:,:,:)
+        call xyzt_to_bznt(atm%ppmv(:,:,:,:,atm%num_molecules), abundance)
+        deallocate(abundance)
+      endif
+    endif
+  enddo
+
+  !Close the level file.
   err = nf90_close(ncid)
   call netcdf_catch(err)
 end subroutine create_atmosphere
@@ -650,6 +685,7 @@ subroutine destroy_atmosphere(atm)
   if (allocated(atm%longitude)) deallocate(atm%longitude)
   if (allocated(atm%molecules)) deallocate(atm%molecules)
   if (allocated(atm%ppmv)) deallocate(atm%ppmv)
+  if (allocated(atm%reference_pressure)) deallocate(atm%reference_pressure)
   if (allocated(atm%solar_zenith_angle)) deallocate(atm%solar_zenith_angle)
   if (allocated(atm%surface_albedo_diffuse_ir)) deallocate(atm%surface_albedo_diffuse_ir)
   if (allocated(atm%surface_albedo_diffuse_uv)) deallocate(atm%surface_albedo_diffuse_uv)
@@ -662,7 +698,7 @@ end subroutine destroy_atmosphere
 
 
 !> @brief Add a variable to the output file.
-subroutine add_variable(output, dimid, indx, name, standard_name, units, fill_value)
+subroutine add_variable(output, dimid, indx, name, standard_name, units, fill_value, positive)
 
   type(Output_t), intent(inout) :: output !< Output object.
   integer, dimension(:), intent(in) :: dimid !< Dimension ids.
@@ -671,6 +707,7 @@ subroutine add_variable(output, dimid, indx, name, standard_name, units, fill_va
   character(len=*), intent(in) :: standard_name !< Variable standard name.
   character(len=*), intent(in), optional :: units !< Variable units.
   real(kind=real64), intent(in), optional :: fill_value !< Fill value.
+  character(len=*), intent(in), optional :: positive !< Vertical sense.
 
   integer :: error
   integer :: varid
@@ -685,6 +722,10 @@ subroutine add_variable(output, dimid, indx, name, standard_name, units, fill_va
   endif
   if (present(fill_value)) then
     error = nf90_put_att(output%ncid, varid, "_FillValue", fill_value)
+    call netcdf_catch(error)
+  endif
+  if (present(positive)) then
+    error = nf90_put_att(output%ncid, varid, "positive", trim(positive))
     call netcdf_catch(error)
   endif
   output%varid(indx) = varid
@@ -703,7 +744,8 @@ subroutine create_flux_file(output, filepath, atm)
   integer, parameter :: level = 3
   integer, parameter :: lon = 1
   integer, parameter :: num_dims = 4
-  integer, parameter :: num_vars = 8
+  integer, parameter :: num_vars = 9
+  integer, parameter :: p = 9
   integer, parameter :: time = 4
 
   error = nf90_create(trim(filepath), nf90_netcdf4, output%ncid)
@@ -726,7 +768,7 @@ subroutine create_flux_file(output, filepath, atm)
   call add_variable(output, output%dimid(lat:lat), lat, "lat", "latitude", "degrees_north")
   error = nf90_put_att(output%ncid, output%varid(lat), "axis", "Y")
   call netcdf_catch(error)
-  call add_variable(output, output%dimid(level:level), level, "level", "air_pressure", "mb")
+  call add_variable(output, output%dimid(level:level), level, "level", "sigma_level", positive="down")
   error = nf90_put_att(output%ncid, output%varid(level), "axis", "Z")
   call netcdf_catch(error)
   call add_variable(output, output%dimid(time:time), time, "time", "time", &
@@ -739,14 +781,17 @@ subroutine create_flux_file(output, filepath, atm)
   call add_variable(output, output%dimid, rlu, "rlu", "upwelling_longwave_flux_in_air", "W m-2")
   call add_variable(output, output%dimid, rsd, "rsd", "downwelling_shortwave_flux_in_air", "W m-2")
   call add_variable(output, output%dimid, rsu, "rsu", "upwelling_shortwave_flux_in_air", "W m-2")
+  call add_variable(output, output%dimid, p, "p", "air_pressure", "mb")
 
-  error = nf90_put_var(output%ncid, lon, atm.longitude)
+  error = nf90_put_var(output%ncid, lon, atm%longitude)
   call netcdf_catch(error)
-  error = nf90_put_var(output%ncid, lat, atm.latitude)
+  error = nf90_put_var(output%ncid, lat, atm%latitude)
   call netcdf_catch(error)
-  error = nf90_put_var(output%ncid, level, atm.level)
+  error = nf90_put_var(output%ncid, level, atm%level)
   call netcdf_catch(error)
-  error = nf90_put_var(output%ncid, time, atm.time)
+  error = nf90_put_var(output%ncid, time, atm%time)
+  call netcdf_catch(error)
+  error = nf90_put_var(output%ncid, p, atm%reference_pressure)
   call netcdf_catch(error)
 end subroutine create_flux_file
 

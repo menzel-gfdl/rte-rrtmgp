@@ -524,7 +524,6 @@ subroutine create_atmosphere(atm, parser)
   start(1) = x_start; start(2) = y_start; start(3) = t_start;
   counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_times;
   call variable_data(ncid, "sp", surface_pressure, start(1:3), counts(1:3))
-  surface_pressure(:,:,:) = mb_to_pa*surface_pressure(:,:,:)
 
   !Two meter temperature;
   start(1) = x_start; start(2) = y_start; start(3) = t_start;

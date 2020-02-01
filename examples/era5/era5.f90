@@ -321,7 +321,6 @@ subroutine create_atmosphere(atm, parser)
     integer :: id
     character(len=8) :: flag
     character(len=32) :: name
-    logical :: use_input
     real(kind=real64) :: mass
   end type MoleculeMeta_t
 
@@ -361,8 +360,10 @@ subroutine create_atmosphere(atm, parser)
   real(kind=real64), dimension(:), allocatable :: weights
   integer :: x_start
   integer :: x_stop
+  real(kind=real64), dimension(:), allocatable :: xmol
   integer :: y_start
   integer :: y_stop
+  real(kind=real64) :: year
   integer :: z_start
   integer :: z_stop
   real(kind=real64), dimension(:,:,:), allocatable :: zenith
@@ -371,11 +372,12 @@ subroutine create_atmosphere(atm, parser)
   !Add/parse command line arguments.
   call add_argument(parser, "level_file", "Input data file.")
   call add_argument(parser, "single_file", "Input data file.")
+  call add_argument(parser, "ghg_file", "Input GHG data file.")
   call add_argument(parser, "-b", "Block size.", .true., "--block-size")
-  call add_argument(parser, "-CH4", "CH4 abundance [ppmv].", .true.)
-  call add_argument(parser, "-CO2", "CO2 abundance [ppmv].", .true.)
+  call add_argument(parser, "-CH4", "Year for CH4 abundance.", .true.)
+  call add_argument(parser, "-CO2", "Year for CO2 abundance.", .true.)
   call add_argument(parser, "-H2O", "Include H2O.", .false.)
-  call add_argument(parser, "-N2O", "N2O abundance [ppmv].", .true.)
+  call add_argument(parser, "-N2O", "Year for N2O abundance.", .true.)
   call add_argument(parser, "-O2", "O2 abundance [ppmv].", .true.)
   call add_argument(parser, "-O3", "Include O3.", .false.)
   call add_argument(parser, "-t", "Starting time index.", .true., "--time-lower-bound")
@@ -546,7 +548,7 @@ subroutine create_atmosphere(atm, parser)
   endif
   call get_argument(parser, "-Z", buffer)
   if (trim(buffer) .eq. "not present") then
-    z_stop = dimension_length(ncid, "level")
+    z_stop = dimension_length(ncid, "sigma_level")
   else
     read(buffer, *) z_stop
   endif
@@ -593,7 +595,7 @@ subroutine create_atmosphere(atm, parser)
   allocate(atm%layer_temperature(block_size, atm%num_layers, num_blocks, atm%num_times))
   call xyzt_to_bznt(atm%layer_temperature, temperature)
   allocate(level_temperature(nlon, nlat, atm%num_levels, atm%num_times))
-  level_temperature(:,:,1,:) = temperature(:,:,1,:)*0.5_real64
+  level_temperature(:,:,1,:) = temperature(:,:,1,:)
   level_temperature(:,:,atm%num_levels,:) = two_meter_temperature(:,:,:)
   deallocate(two_meter_temperature)
   do m = 1, atm%num_times
@@ -616,57 +618,74 @@ subroutine create_atmosphere(atm, parser)
   deallocate(level_temperature)
 
   !Molecular abundances.
+  allocate(atm%molecules(num_molecules))
+  atm%num_molecules = 0
+  allocate(atm%ppmv(block_size, atm%num_layers, num_blocks, atm%num_times, num_molecules))
+
+  !Read water vapor and ozone from the level file.
   molecules(1)%id = h2o
   molecules(1)%flag = "-H2O"
   molecules(1)%name = "q"
-  molecules(1)%use_input = .false.
   molecules(1)%mass = 18.02_real64
   molecules(2)%id = o3
   molecules(2)%flag = "-O3"
   molecules(2)%name = "o3"
-  molecules(2)%use_input = .false.
   molecules(2)%mass = 47.997_real64
-  molecules(3)%id = co2
-  molecules(3)%flag = "-CO2"
-  molecules(3)%name = "co2"
-  molecules(3)%use_input = .true.
-  molecules(4)%id = n2o
-  molecules(4)%flag = "-N2O"
-  molecules(4)%name = "n2o"
-  molecules(4)%use_input = .true.
-  molecules(5)%id = ch4
-  molecules(5)%flag = "-CH4"
-  molecules(5)%name = "ch4"
-  molecules(5)%use_input = .true.
-  molecules(6)%id = o2
-  molecules(6)%flag = "-O2"
-  molecules(6)%name = "o2"
-  molecules(6)%use_input = .true.
-  allocate(atm%molecules(num_molecules))
-  atm%num_molecules = 0
-  allocate(atm%ppmv(block_size, atm%num_layers, num_blocks, atm%num_times, num_molecules))
-  do i = 1, num_molecules
+  do i = 1, 2
     call get_argument(parser, trim(molecules(i)%flag), buffer)
     if (trim(buffer) .ne. "not present") then
       atm%num_molecules = atm%num_molecules + 1
       atm%molecules(atm%num_molecules) = molecules(i)%id
-      if (molecules(i)%use_input) then
-        read(buffer, *) input_abundance
-        atm%ppmv(:,:,:,:,atm%num_molecules) = input_abundance*from_ppmv
-      else
-        start(1) = x_start; start(2) = y_start; start(3) = z_start; start(4) = t_start;
-        counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_layers; counts(4) = atm%num_times;
-        call variable_data(ncid, trim(molecules(i)%name), abundance, start, counts)
-        abundance(:,:,:,:) = (dry_air_mass/molecules(i)%mass)*abundance(:,:,:,:)
-        call xyzt_to_bznt(atm%ppmv(:,:,:,:,atm%num_molecules), abundance)
-        deallocate(abundance)
-      endif
+      start(1) = x_start; start(2) = y_start; start(3) = z_start; start(4) = t_start;
+      counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_layers; counts(4) = atm%num_times;
+      call variable_data(ncid, trim(molecules(i)%name), abundance, start, counts)
+      abundance(:,:,:,:) = (dry_air_mass/molecules(i)%mass)*abundance(:,:,:,:)
+      call xyzt_to_bznt(atm%ppmv(:,:,:,:,atm%num_molecules), abundance)
+      deallocate(abundance)
     endif
   enddo
 
-  !Close the level file.
+  !Close the level file and open the greenhouse gas file.
   err = nf90_close(ncid)
   call netcdf_catch(err)
+  call get_argument(parser, "ghg_file", buffer)
+  err = nf90_open(buffer, NF90_NOWRITE, ncid)
+  call netcdf_catch(err)
+
+  !Get the molecular abundance from their input year.
+  molecules(3)%id = co2
+  molecules(3)%flag = "-CO2"
+  molecules(3)%name = "co2"
+  molecules(4)%id = n2o
+  molecules(4)%flag = "-N2O"
+  molecules(4)%name = "n2o"
+  molecules(5)%id = ch4
+  molecules(5)%flag = "-CH4"
+  molecules(5)%name = "ch4"
+  do i = 3, 5
+    call get_argument(parser, trim(molecules(i)%flag), buffer)
+    if (trim(buffer) .ne. "not present") then
+      atm%num_molecules = atm%num_molecules + 1
+      atm%molecules(atm%num_molecules) = molecules(i)%id
+      read(buffer, *) year
+      start(1) = int(year); counts(1) = 1
+      call variable_data(ncid, trim(molecules(i)%name), xmol, start(1:1), counts(1:1))
+      atm%ppmv(:,:,:,:,atm%num_molecules) = xmol(1)*from_ppmv
+      deallocate(xmol)
+    endif
+  enddo
+
+  !Get the molecular abundance from the command line.
+  molecules(6)%id = o2
+  molecules(6)%flag = "-O2"
+  molecules(6)%name = "o2"
+  call get_argument(parser, trim(molecules(6)%flag), buffer)
+  if (trim(buffer) .ne. "not present") then
+    atm%num_molecules = atm%num_molecules + 1
+    atm%molecules(atm%num_molecules) = molecules(i)%id
+    read(buffer, *) input_abundance
+    atm%ppmv(:,:,:,:,atm%num_molecules) = input_abundance*from_ppmv
+  endif
 end subroutine create_atmosphere
 
 
@@ -757,7 +776,7 @@ subroutine create_flux_file(output, filepath, atm)
   call netcdf_catch(error)
   error = nf90_def_dim(output%ncid, "level", atm.num_levels, output%dimid(level))
   call netcdf_catch(error)
-  error = nf90_def_dim(output%ncid, "time", atm.num_times, output%dimid(time))
+  error = nf90_def_dim(output%ncid, "time", nf90_unlimited, output%dimid(time))
   call netcdf_catch(error)
 
   allocate(output%varid(num_vars))

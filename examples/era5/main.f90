@@ -117,7 +117,7 @@ call catch(error)
 !Initialize emissivity.
 num_lw_bands = lw_k%get_nband()
 allocate(emissivity(num_lw_bands, block_size))
-emissivity(:,:) = 0.98
+emissivity(:,:) = 1._real64
 
 !Initialize top-of-atmosphere flux.
 num_sw_gpoints = sw_k%get_ngpt()

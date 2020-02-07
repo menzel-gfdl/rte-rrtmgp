@@ -64,6 +64,10 @@ gases(o3) = "o3"
 gases(co2) = "co2"
 gases(n2o) = "n2o"
 gases(ch4) = "ch4"
+gases(cfc11) = "cfc11"
+gases(cfc12) = "cfc12"
+gases(cfc113) = "cfc113"
+gases(hcfc22) = "cfc22"
 gases(o2) = "o2"
 allocate(gas_names(atm%num_molecules))
 do i = 1, atm%num_molecules

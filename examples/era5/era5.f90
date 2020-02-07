@@ -52,8 +52,12 @@ integer, parameter, public :: o3 = 2
 integer, parameter, public :: co2 = 3
 integer, parameter, public :: n2o = 4
 integer, parameter, public :: ch4 = 5
-integer, parameter, public :: o2 = 6
-integer, parameter, public :: num_molecules = 6
+integer, parameter, public :: cfc11 = 6
+integer, parameter, public :: cfc12 = 7
+integer, parameter, public :: cfc113 = 8
+integer, parameter, public :: hcfc22 = 9
+integer, parameter, public :: o2 = 10
+integer, parameter, public :: num_molecules = 10
 integer, parameter, public :: rld = 5
 integer, parameter, public :: rlu = 6
 integer, parameter, public :: rsd = 7
@@ -374,8 +378,12 @@ subroutine create_atmosphere(atm, parser)
   call add_argument(parser, "single_file", "Input data file.")
   call add_argument(parser, "ghg_file", "Input GHG data file.")
   call add_argument(parser, "-b", "Block size.", .true., "--block-size")
+  call add_argument(parser, "-CFC-11", "Year for CFC-11 abundance.", .true.)
+  call add_argument(parser, "-CFC-12", "Year for CFC-12 abundance.", .true.)
+  call add_argument(parser, "-CFC-113", "Year for CFC-113 abundance.", .true.)
   call add_argument(parser, "-CH4", "Year for CH4 abundance.", .true.)
   call add_argument(parser, "-CO2", "Year for CO2 abundance.", .true.)
+  call add_argument(parser, "-HCFC-22", "Year for HCFC-22 abundance.", .true.)
   call add_argument(parser, "-H2O", "Include H2O.", .false.)
   call add_argument(parser, "-N2O", "Year for N2O abundance.", .true.)
   call add_argument(parser, "-O2", "O2 abundance [ppmv].", .true.)
@@ -662,7 +670,19 @@ subroutine create_atmosphere(atm, parser)
   molecules(5)%id = ch4
   molecules(5)%flag = "-CH4"
   molecules(5)%name = "ch4"
-  do i = 3, 5
+  molecules(6)%id = cfc11
+  molecules(6)%flag = "-CFC-11"
+  molecules(6)%name = "f11"
+  molecules(7)%id = cfc12
+  molecules(7)%flag = "-CFC-12"
+  molecules(7)%name = "f12"
+  molecules(8)%id = cfc113
+  molecules(8)%flag = "-CFC-113"
+  molecules(8)%name = "f113"
+  molecules(9)%id = hcfc22
+  molecules(9)%flag = "-HCFC-22"
+  molecules(9)%name = "f22"
+  do i = 3, 9
     call get_argument(parser, trim(molecules(i)%flag), buffer)
     if (trim(buffer) .ne. "not present") then
       atm%num_molecules = atm%num_molecules + 1
@@ -676,9 +696,9 @@ subroutine create_atmosphere(atm, parser)
   enddo
 
   !Get the molecular abundance from the command line.
-  molecules(6)%id = o2
-  molecules(6)%flag = "-O2"
-  molecules(6)%name = "o2"
+  molecules(10)%id = o2
+  molecules(10)%flag = "-O2"
+  molecules(10)%name = "o2"
   call get_argument(parser, trim(molecules(6)%flag), buffer)
   if (trim(buffer) .ne. "not present") then
     atm%num_molecules = atm%num_molecules + 1

@@ -4,6 +4,7 @@ program main
 use, intrinsic :: iso_fortran_env
 use argparse
 use era5
+use incomplete_beta, only: IncompleteBeta
 use mo_fluxes, only: ty_fluxes_broadband
 use mo_gas_concentrations, only: ty_gas_concs
 use mo_gas_optics_rrtmgp, only: ty_gas_optics_rrtmgp
@@ -12,10 +13,14 @@ use mo_optical_props, only: ty_optical_props_1scl, ty_optical_props_2str
 use mo_rte_lw, only: rte_lw
 use mo_rte_sw, only: rte_sw
 use mo_source_functions, only: ty_source_func_lw
+use stochastic_clouds, only: overlap_parameter, TotalWaterPDF
 implicit none
 
 type(Atmosphere_t) :: atm
+type(IncompleteBeta) :: beta
+integer :: beta_shape
 character(len=valuelen) :: buffer
+logical :: clear
 real(kind=real64), dimension(:,:), allocatable :: diffuse_albedo
 real(kind=real64), dimension(:,:), allocatable :: direct_albedo
 real(kind=real64), dimension(:,:), allocatable :: emissivity
@@ -24,6 +29,7 @@ character(len=8), dimension(:), allocatable :: gas_names
 character(len=8), dimension(num_molecules) :: gases
 integer :: i
 integer :: infrared_cutoff
+real(kind=real64) :: input_emissivity
 integer :: j
 integer :: k
 type(ty_fluxes_broadband) :: lw_fluxes
@@ -41,6 +47,7 @@ integer :: num_sw_gpoints
 type(Output_t) :: output
 type(Parser_t) :: parser
 type(ty_gas_concs) :: ppmv
+real(kind=real64) :: scale_length
 type(ty_source_func_lw) :: source
 type(ty_fluxes_broadband) :: sw_fluxes
 type(ty_gas_optics_rrtmgp) :: sw_k
@@ -48,14 +55,20 @@ type(ty_optical_props_2str) :: sw_optics
 integer :: t
 real(kind=real64), dimension(:,:), allocatable :: toa
 real(kind=real64), dimension(:), allocatable :: total_irradiance
+type(TotalWaterPDF) :: water_pdf
 real(kind=real64), dimension(:), allocatable :: zenith
 
 !Add arguments.
 parser = create_parser()
 call add_argument(parser, "lw_kdist_file", "Longwave k-distribution file.")
 call add_argument(parser, "sw_kdist_file", "Shortwave k-distribution file.")
+call add_argument(parser, "beta_file", "Incomplete beta distribution file.")
 call add_argument(parser, "-a", "Index of last infrared band", .true., "--last-ir-band")
+call add_argument(parser, "-clear", "Run in clear-sky mode.", .false.)
+call add_argument(parser, "-e", "Emissivity.", .true.)
 call add_argument(parser, "-o", "Output file", .true., "--output")
+call add_argument(parser, "-p", "Beta distribution shape parameter", .true.)
+call add_argument(parser, "-s", "Overlap parameter scale length.", .true.)
 call create_atmosphere(atm, parser)
 
 !Set the gas names.
@@ -87,26 +100,18 @@ call load_and_init(sw_k, trim(buffer), ppmv)
 !Adjust small pressures and temperatures so RRTMGP can run.
 max_pressure = min(lw_k%get_press_max(), sw_k%get_press_max())
 min_pressure = max(lw_k%get_press_min(), sw_k%get_press_min())
+where (atm%level_pressure .gt. max_pressure)
+  atm%level_pressure(:,:,:,:) = max_pressure - epsilon(max_pressure)
+elsewhere (atm%level_pressure .lt. min_pressure)
+  atm%level_pressure(:,:,:,:) = min_pressure + epsilon(min_pressure)
+endwhere
 max_temperature = min(lw_k%get_temp_max(), sw_k%get_temp_max())
 min_temperature = max(lw_k%get_temp_min(), sw_k%get_temp_min())
-do m = 1, size(atm%level_pressure, 4)
-  do k = 1, size(atm%level_pressure, 3)
-    do j = 1, size(atm%level_pressure, 2)
-      do i = 1, size(atm%level_pressure, 1)
-        if (atm%level_pressure(i,j,k,m) .gt. max_pressure) then
-          atm%level_pressure(i,j,k,m) = max_pressure - epsilon(max_pressure)
-        elseif (atm%level_pressure(i,j,k,m) .lt. min_pressure) then
-          atm%level_pressure(i,j,k,m) = min_pressure + epsilon(min_pressure)
-        endif
-        if (atm%level_temperature(i,j,k,m) .gt. max_temperature) then
-          atm%level_temperature(i,j,k,m) = max_temperature - epsilon(max_temperature)
-        elseif (atm%level_temperature(i,j,k,m) .lt. min_temperature) then
-          atm%level_temperature(i,j,k,m) = min_temperature + epsilon(min_temperature)
-        endif
-      enddo
-    enddo
-  enddo
-enddo
+where (atm%level_temperature .gt. max_temperature)
+  atm%level_temperature(:,:,:,:) = max_temperature - epsilon(max_temperature)
+elsewhere (atm%level_temperature .lt. min_temperature)
+  atm%level_temperature(:,:,:,:) = min_temperature + epsilon(min_temperature)
+endwhere
 
 !Initialize optics objects.
 error = lw_optics%alloc_1scl(block_size, atm%num_layers, lw_k)
@@ -121,7 +126,13 @@ call catch(error)
 !Initialize emissivity.
 num_lw_bands = lw_k%get_nband()
 allocate(emissivity(num_lw_bands, block_size))
-emissivity(:,:) = 1._real64
+call get_argument(parser, "-e", buffer)
+if (trim(buffer) .eq. "not present") then
+  emissivity(:,:) = 1._real64
+else
+  read(buffer, *) input_emissivity
+  emissivity(:,:) = input_emissivity
+endif
 
 !Initialize top-of-atmosphere flux.
 num_sw_gpoints = sw_k%get_ngpt()
@@ -140,6 +151,29 @@ if (trim(buffer) .eq. "not present") then
   infrared_cutoff = num_sw_bands/2 + 1
 else
   read(buffer, *) infrared_cutoff
+endif
+
+!Determine if the run is all-sky or clear-sky.
+call get_argument(parser, "-clear", buffer)
+clear = trim(buffer) .eq. "not_present"
+
+if (.not. clear) then
+  !Initialize cloud optics objects.
+  call get_argument(parser, "beta_file", buffer)
+  call beta%construct(buffer)
+  call get_argument(parser, "-p", buffer)
+  if (trim(buffer) .eq. "not present") then
+    beta_shape = 5
+  else
+    read(buffer, *) beta_shape
+  endif
+  call water_pdf%construct(beta_shape, beta_shape, beta)
+  call get_argument(parser, "-s", buffer)
+  if (trim(buffer) .eq. "not present") then
+    scale_length = 2._real64
+  else
+    read(buffer, *) scale_length
+  endif
 endif
 
 !Initialize fluxes.
@@ -169,6 +203,9 @@ do t = 1, atm%num_times
                             atm%layer_temperature(:,:,i,t), atm%surface_temperature(:,i,t), &
                             ppmv, lw_optics, source, tlev=atm%level_temperature(:,:,i,t))
     call catch(error)
+    if (.not. clear) then
+      !Calculate cloud optics on longwave bands.
+    endif
     error = rte_lw(lw_optics, .true., source, emissivity, lw_fluxes, n_gauss_angles=1)
     call catch(error)
     do j = 1, block_size
@@ -180,6 +217,9 @@ do t = 1, atm%num_times
     error = sw_k%gas_optics(atm%layer_pressure(:,:,i,t), atm%level_pressure(:,:,i,t), &
                             atm%layer_temperature(:,:,i,t), ppmv, sw_optics, toa)
     call catch(error)
+    if (.not. clear) then
+      !Calculate cloud optics on shortwave bands.
+    endif
     do j = 1, block_size
       !Avoid columns with large zenith angles because RTE will crash.
       if (atm%solar_zenith_angle(j,i,t) .gt. min_cos_zenith) then
@@ -201,7 +241,7 @@ do t = 1, atm%num_times
         diffuse_albedo(j,:) = atm%surface_albedo_diffuse_uv(:,i,t)
       endif
     enddo
-    error = rte_sw(sw_optics, .true., zenith, toa, direct_albedo, diffuse_albedo, sw_fluxes)
+!   error = rte_sw(sw_optics, .true., zenith, toa, direct_albedo, diffuse_albedo, sw_fluxes)
     call catch(error)
     do j = 1, block_size
       if (atm%solar_zenith_angle(j,i,t) .lt. min_cos_zenith) then
@@ -216,6 +256,7 @@ enddo
 
 !Clean up.
 call close_flux_file(output)
+call beta%destruct()
 call destroy_atmosphere(atm)
 deallocate(diffuse_albedo)
 deallocate(direct_albedo)
@@ -232,6 +273,7 @@ deallocate(sw_fluxes%flux_up)
 call sw_optics%finalize()
 deallocate(toa)
 deallocate(total_irradiance)
+call water_pdf%destruct()
 deallocate(zenith)
 
 

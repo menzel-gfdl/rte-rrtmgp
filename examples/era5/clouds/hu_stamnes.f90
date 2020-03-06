@@ -20,6 +20,7 @@ type, public :: HuStamnes
   real, dimension(:,:), allocatable :: c1 !< Exctinction coefficient parameter (band, radius).
   real, dimension(:,:), allocatable :: c2 !< Single-scatter albedo parameter (band, radius).
   real, dimension(:,:), allocatable :: c3 !< Asymmetry factor parameter (band, radius).
+  integer :: last_ir_band !< Index of last infrared (longwave) band.
   real :: max_radius !< Maximum radius defined in parameterization [micron].
   real :: min_radius !< Minimum radius defined in parameterization [micron].
   real, dimension(:), allocatable :: radii !< Radius bins [micron] for parameterization (radius).
@@ -59,6 +60,7 @@ subroutine construct(self, path)
   self%radii(n+1) = radius_bounds(2,n)
   deallocate(radius_bounds)
   call read_variable(ncid, "band_bnds", self%band_limits)
+  call read_attribute(ncid, "band_bnds", "last_IR_band", self%last_ir_band)
   call read_variable(ncid, "band", self%bands)
   call read_variable(ncid, "a1", self%a1)
   call read_variable(ncid, "a2", self%a2)

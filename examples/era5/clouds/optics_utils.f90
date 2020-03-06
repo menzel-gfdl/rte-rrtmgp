@@ -100,10 +100,11 @@ elemental pure subroutine thick_average(self, optics)
   do j = i, n
     if (self%band_limits(2,m) .lt. optics%bands(j)) exit
     do k = c, m
-      if (self%band_limits(1,c) .le. optics%bands(j) .and. self%band_limits(2,c) .ge. &
+      if (self%band_limits(1,k) .le. optics%bands(j) .and. self%band_limits(2,k) .ge. &
           optics%bands(j)) exit
     enddo
     c = k
+    if (k .eq. 1) k = 2
     optics%extinction_coefficient(j) = interp(self%bands(k-1:k), &
                                               self%extinction_coefficient(k-1:k), &
                                               optics%bands(j))

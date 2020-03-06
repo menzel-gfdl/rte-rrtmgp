@@ -2,30 +2,32 @@
 !! doi: 10.1175/1520-0442(1993)006<0728:AAPOTR>2.0.CO;2
 module hu_stamnes
 use netcdf_utils, only: close_dataset, open_dataset, read_attribute, read_variable
+use optics_utils, only: OpticalProperties
 implicit none
 private
 
 
 !> @brief Hu and Stamnes cloud liquid water parameterization.
 type, public :: HuStamnes
-  real, dimension(:,:), allocatable :: a1 !< Exctinction coefficient parameter.
-  real, dimension(:,:), allocatable :: a2 !< Single-scatter albedo parameter.
-  real, dimension(:,:), allocatable :: a3 !< Asymmetry factor parameter.
-  real, dimension(2) :: band_limits !< Lower/upper bounds of parameterization [cm-1].
-  real, dimension(:), allocatable :: bands !< Parameterization band centers [cm-1].
-  real, dimension(:,:), allocatable :: b1 !< Exctinction coefficient parameter.
-  real, dimension(:,:), allocatable :: b2 !< Single-scatter albedo parameter.
-  real, dimension(:,:), allocatable :: b3 !< Asymmetry factor parameter.
-  real, dimension(:,:), allocatable :: c1 !< Exctinction coefficient parameter.
-  real, dimension(:,:), allocatable :: c2 !< Single-scatter albedo parameter.
-  real, dimension(:,:), allocatable :: c3 !< Asymmetry factor parameter.
+  real, dimension(:,:), allocatable :: a1 !< Exctinction coefficient parameter (band, radius).
+  real, dimension(:,:), allocatable :: a2 !< Single-scatter albedo parameter (band, radius).
+  real, dimension(:,:), allocatable :: a3 !< Asymmetry factor parameter (band, radius).
+  real, dimension(:,:), allocatable :: band_limits !< Lower/upper bounds of parameterization [cm-1] (2, band).
+  real, dimension(:), allocatable :: bands !< Parameterization band centers [cm-1] (band).
+  real, dimension(:,:), allocatable :: b1 !< Exctinction coefficient parameter (band, radius).
+  real, dimension(:,:), allocatable :: b2 !< Single-scatter albedo parameter (band, radius).
+  real, dimension(:,:), allocatable :: b3 !< Asymmetry factor parameter (band, radius).
+  real, dimension(:,:), allocatable :: c1 !< Exctinction coefficient parameter (band, radius).
+  real, dimension(:,:), allocatable :: c2 !< Single-scatter albedo parameter (band, radius).
+  real, dimension(:,:), allocatable :: c3 !< Asymmetry factor parameter (band, radius).
   real :: max_radius !< Maximum radius defined in parameterization [micron].
   real :: min_radius !< Minimum radius defined in parameterization [micron].
-  real, dimension(:), allocatable :: radii !< Radius bins [micron] for parameterization.
+  real, dimension(:), allocatable :: radii !< Radius bins [micron] for parameterization (radius).
   contains
   procedure, public :: construct
   procedure, public :: destruct
   procedure, public :: optics
+  procedure, private :: optics_
 endtype HuStamnes
 
 
@@ -56,8 +58,8 @@ subroutine construct(self, path)
   self%radii(:n) = radius_bounds(1,:)
   self%radii(n+1) = radius_bounds(2,n)
   deallocate(radius_bounds)
+  call read_variable(ncid, "band_bnds", self%band_limits)
   call read_variable(ncid, "band", self%bands)
-  call read_attribute(ncid, "band", "valid_range", self%band_limits)
   call read_variable(ncid, "a1", self%a1)
   call read_variable(ncid, "a2", self%a2)
   call read_variable(ncid, "a3", self%a3)
@@ -79,6 +81,7 @@ subroutine destruct(self)
   if (allocated(self%a1)) deallocate(self%a1)
   if (allocated(self%a2)) deallocate(self%a2)
   if (allocated(self%a3)) deallocate(self%a3)
+  if (allocated(self%band_limits)) deallocate(self%band_limits)
   if (allocated(self%bands)) deallocate(self%bands)
   if (allocated(self%b1)) deallocate(self%b1)
   if (allocated(self%b2)) deallocate(self%b2)
@@ -91,39 +94,54 @@ end subroutine destruct
 
 
 !> @brief Calculates cloud optics.
-subroutine optics(self, water_concentration, equivalent_radius, &
-                  extinction_coefficient, single_scatter_albedo, asymmetry_factor)
+elemental pure subroutine optics(self, water_concentration, equivalent_radius, &
+                                 optical_properties)
+
+  class(HuStamnes), intent(in) :: self
+  real, intent(in) :: water_concentration !< Water concentration [g m-3].
+  real, intent(in) :: equivalent_radius !< Particle equivalent radius [micron].
+  type(OpticalProperties), intent(inout) :: optical_properties !< Optical properties.
+
+  integer :: i
+
+  do i = 1, size(optical_properties%bands)
+    call self%optics_(water_concentration, equivalent_radius, i, &
+                      optical_properties%extinction_coefficient(i), &
+                      optical_properties%single_scatter_albedo(i), &
+                      optical_properties%asymmetry_factor(i))
+  enddo
+end subroutine optics
+
+
+!> @brief Calculates cloud optics.
+elemental pure subroutine optics_(self, water_concentration, equivalent_radius, band, &
+                                  extinction_coefficient, single_scatter_albedo, &
+                                  asymmetry_factor)
 
   class(HuStamnes), intent(in) :: self
   real, intent(in) :: water_concentration !< Water concentration [g m-3].
   real, intent(in) :: equivalent_radius !< Droplet equivalent radius [micron].
-  real, dimension(:), allocatable, intent(out) :: extinction_coefficient !< Extinction coefficient [cm-1] (grid).
-  real, dimension(:), allocatable, intent(out) :: single_scatter_albedo !< Single-scatter albedo (grid).
-  real, dimension(:), allocatable, intent(out) :: asymmetry_factor !< Asymmetry factor (grid).
+  integer, intent(in) :: band !< Band index.
+  real, intent(out) :: extinction_coefficient !< Extinction coefficient [cm-1] (grid).
+  real, intent(out) :: single_scatter_albedo !< Single-scatter albedo (grid).
+  real, intent(out) :: asymmetry_factor !< Asymmetry factor (grid).
 
   real, parameter :: cm_to_km = 1.e-5
   integer :: i
   real :: r
 
-  if (equivalent_radius .lt. self%max_radius) then
-    r = max(self%min_radius, equivalent_radius)
-  else
-    r = min(self%max_radius, equivalent_radius)
-  endif
+  r = min(self%max_radius, max(self%min_radius, equivalent_radius))
   do i = 2, size(self%radii)
     if (self%radii(i) .gt. r) then
       exit
     endif
   enddo
   i = i - 1
-  allocate(extinction_coefficient(size(self%bands)))
-  allocate(single_scatter_albedo(size(self%bands)))
-  allocate(asymmetry_factor(size(self%bands)))
-  extinction_coefficient(:) = water_concentration*cm_to_km*(self%a1(:,i)*(r**self%b1(:,i)) + &
-                              self%c1(:,i)) !Equation 13.
-  single_scatter_albedo(:) = 1. - (self%a2(:,i)*(r**self%b2(:,i)) + self%c2(:,i)) !Equation 14.
-  asymmetry_factor(:) = self%a3(:,i)*(r**self%b3(:,i)) + self%c3(:,i) !Equation 15.
-end subroutine optics
+  extinction_coefficient = water_concentration*cm_to_km*(self%a1(band,i)* &
+                           (r**self%b1(band,i)) + self%c1(band,i)) !Equation 13.
+  single_scatter_albedo = 1. - (self%a2(band,i)*(r**self%b2(band,i)) + self%c2(band,i)) !Equation 14.
+  asymmetry_factor = self%a3(band,i)*(r**self%b3(band,i)) + self%c3(band,i) !Equation 15.
+end subroutine optics_
 
 
 end module hu_stamnes

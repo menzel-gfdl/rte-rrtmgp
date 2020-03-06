@@ -9,9 +9,14 @@ private
 
 
 type, public :: Atmosphere_t
+  logical :: clear !< Flag for clear-sky only runs.
+  real(kind=real64), dimension(:,:,:,:), allocatable :: cloud_fraction !< Saturation volume fraction (block_size, layer, num_blocks, time).
+  real(kind=real64), dimension(:,:,:,:), allocatable :: cloud_ice_content !< Cloud ice water content [g m-3]  (block_size, layer, num_blocks, time)
+  real(kind=real64), dimension(:,:,:,:), allocatable :: cloud_liquid_content !< Cloud liquid water content [g m-3] (block_size, layer, num_blocks, time)
   real(kind=real64), dimension(:), allocatable :: latitude !< Latitude [degrees].
   real(kind=real64), dimension(:,:,:,:), allocatable :: layer_pressure !< Pressure [Pa] (block_size, layer, num_blocks, time).
   real(kind=real64), dimension(:,:,:,:), allocatable :: layer_temperature !< Temperature [K] (block_size, layer, num_blocks, time).
+  real(kind=real64), dimension(:,:,:,:), allocatable :: layer_thickness !< Thickness [m] (block_size, layer, num_blocks, time).
   real(kind=real64), dimension(:), allocatable :: level !< Pressure [mb].
   real(kind=real64), dimension(:,:,:,:), allocatable :: level_pressure !< Pressure [Pa] (blocks_size level, num_blocks, time).
   real(kind=real64), dimension(:,:,:,:), allocatable :: level_temperature !< Temperature [K] (block_size, level, num_blocks, time).
@@ -318,7 +323,7 @@ end subroutine xyzt_to_bznt
 !> @brief Reserve memory and read in atmospheric data.
 subroutine create_atmosphere(atm, parser)
 
-  type(Atmosphere_t), intent(out) :: atm
+  type(Atmosphere_t), intent(inout) :: atm
   type(Parser_t), intent(inout) :: parser
 
   type :: MoleculeMeta_t
@@ -329,10 +334,12 @@ subroutine create_atmosphere(atm, parser)
   end type MoleculeMeta_t
 
   real(kind=real64), dimension(:,:,:,:), allocatable :: abundance
+  real(kind=real64), dimension(:,:,:,:), allocatable :: air_density
   real(kind=real64), dimension(:,:,:), allocatable :: albedo
   character(len=valuelen) :: buffer
+  real(kind=real64), dimension(:,:,:,:), allocatable :: cloud_fraction
   integer, dimension(4) :: counts
-  real(kind=real64), parameter :: dry_air_mass = 28.9647_real64
+  real(kind=real64), parameter :: dry_air_mass = 28.9647_real64 ![g mol-1].
   real(kind=real64), parameter :: from_ppmv = 1.e-6_real64
   integer :: err
   integer :: global_nlat
@@ -342,17 +349,20 @@ subroutine create_atmosphere(atm, parser)
   real(kind=real64), dimension(:,:,:), allocatable :: irradiance
   integer :: j
   integer :: k
+  real(kind=real64), parameter :: kg_to_g = 1000._real64 ![g kg-1].
   real(kind=real64), dimension(:), allocatable :: latitude
   real(kind=real64), dimension(:,:,:,:), allocatable :: level_pressure
   real(kind=real64), dimension(:,:,:,:), allocatable :: level_temperature
   integer :: m
-  real(kind=real64), parameter :: mb_to_pa = 100._real64
+  real(kind=real64), parameter :: mb_to_pa = 100._real64 ![Pa mb-1].
   real(kind=real64) :: mean_irradiance
   integer :: ncid
   integer :: nlayer
   real(kind=real64), parameter :: pi = 3.14159265359_real64
   real(kind=real64), dimension(:,:,:,:), allocatable :: pressure
-  real(kind=real64), parameter :: seconds_per_day = 86400._real64
+  real(kind=real64), parameter :: r_dry_air = 287.058_real64 ![J kg-1 K-1].
+  real(kind=real64), parameter :: r_h2o = 461.495_real64 ![J kg-1 K-1].
+  real(kind=real64), parameter :: seconds_per_day = 86400._real64 ![s day-1].
   integer, dimension(4) :: start
   real(kind=real64), dimension(:,:,:), allocatable :: surface_pressure
   real(kind=real64), dimension(:,:,:), allocatable :: surface_temperature
@@ -361,9 +371,11 @@ subroutine create_atmosphere(atm, parser)
   real(kind=real64), dimension(:,:,:,:), allocatable :: temperature
   real(kind=real64) :: total_weight
   real(kind=real64), dimension(:,:,:), allocatable :: two_meter_temperature
+  real(kind=real64), parameter :: water_mass = 18.02_real64 ![g mol-1].
   real(kind=real64), dimension(:), allocatable :: weights
   integer :: x_start
   integer :: x_stop
+  real(kind=real64), dimension(:,:,:,:), allocatable :: xh2o
   real(kind=real64), dimension(:), allocatable :: xmol
   integer :: y_start
   integer :: y_stop
@@ -382,6 +394,7 @@ subroutine create_atmosphere(atm, parser)
   call add_argument(parser, "-CFC-12", "Year for CFC-12 abundance.", .true.)
   call add_argument(parser, "-CFC-113", "Year for CFC-113 abundance.", .true.)
   call add_argument(parser, "-CH4", "Year for CH4 abundance.", .true.)
+  call add_argument(parser, "-clouds", "Cloud input data file.", .true.)
   call add_argument(parser, "-CO2", "Year for CO2 abundance.", .true.)
   call add_argument(parser, "-HCFC-22", "Year for HCFC-22 abundance.", .true.)
   call add_argument(parser, "-H2O", "Include H2O.", .false.)
@@ -630,11 +643,20 @@ subroutine create_atmosphere(atm, parser)
   atm%num_molecules = 0
   allocate(atm%ppmv(block_size, atm%num_layers, num_blocks, atm%num_times, num_molecules))
 
+  !Get water abundance.
+  start(1) = x_start; start(2) = y_start; start(3) = z_start; start(4) = t_start;
+  counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_layers; counts(4) = atm%num_times;
+  call variable_data(ncid, "q", abundance, start, counts)
+  allocate(xh2o(block_size, atm%num_layers, num_blocks, atm%num_times))
+  call xyzt_to_bznt(xh2o, abundance)
+  deallocate(abundance)
+
+  !Convert from (mass water)/(mass total air) to (mole water)/(mole dry air).
+  xh2o(:,:,:,:) = (dry_air_mass/water_mass)*xh2o(:,:,:,:)/(1._real64 - xh2o(:,:,:,:))
+
   !Read water vapor and ozone from the level file.
   molecules(1)%id = h2o
   molecules(1)%flag = "-H2O"
-  molecules(1)%name = "q"
-  molecules(1)%mass = 18.02_real64
   molecules(2)%id = o3
   molecules(2)%flag = "-O3"
   molecules(2)%name = "o3"
@@ -644,12 +666,16 @@ subroutine create_atmosphere(atm, parser)
     if (trim(buffer) .ne. "not present") then
       atm%num_molecules = atm%num_molecules + 1
       atm%molecules(atm%num_molecules) = molecules(i)%id
-      start(1) = x_start; start(2) = y_start; start(3) = z_start; start(4) = t_start;
-      counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_layers; counts(4) = atm%num_times;
-      call variable_data(ncid, trim(molecules(i)%name), abundance, start, counts)
-      abundance(:,:,:,:) = (dry_air_mass/molecules(i)%mass)*abundance(:,:,:,:)
-      call xyzt_to_bznt(atm%ppmv(:,:,:,:,atm%num_molecules), abundance)
-      deallocate(abundance)
+      if (molecules(i)%id .eq. h2o) then
+        atm%ppmv(:,:,:,:,atm%num_molecules) = xh2o(:,:,:,:)
+      else
+        start(1) = x_start; start(2) = y_start; start(3) = z_start; start(4) = t_start;
+        counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_layers; counts(4) = atm%num_times;
+        call variable_data(ncid, trim(molecules(i)%name), abundance, start, counts)
+        abundance(:,:,:,:) = (dry_air_mass/molecules(i)%mass)*abundance(:,:,:,:)
+        call xyzt_to_bznt(atm%ppmv(:,:,:,:,atm%num_molecules), abundance)
+        deallocate(abundance)
+      endif
     endif
   enddo
 
@@ -694,6 +720,8 @@ subroutine create_atmosphere(atm, parser)
       deallocate(xmol)
     endif
   enddo
+  err = nf90_close(ncid)
+  call netcdf_catch(err)
 
   !Get the molecular abundance from the command line.
   molecules(10)%id = o2
@@ -706,6 +734,51 @@ subroutine create_atmosphere(atm, parser)
     read(buffer, *) input_abundance
     atm%ppmv(:,:,:,:,atm%num_molecules) = input_abundance*from_ppmv
   endif
+
+  !Determine if the run is all-sky or clear-sky.
+  call get_argument(parser, "-clouds", buffer)
+  atm%clear = trim(buffer) .eq. "not present"
+  if (.not. atm%clear) then
+    !Convert from (mole water)/(mole dry air) to (mole water)/(mole total air).
+    xh2o(:,:,:,:) = xh2o(:,:,:,:)/(1._real64 + xh2o(:,:,:,:))
+
+    !Calculate total air density.
+    allocate(air_density(block_size, atm%num_layers, num_blocks, atm%num_times))
+    air_density = (xh2o(:,:,:,:)*atm%layer_pressure(:,:,:,:))/ &
+                  (r_h2o*atm%layer_temperature(:,:,:,:)) + &
+                  ((1._real64 - xh2o(:,:,:,:))*atm%layer_pressure)/ &
+                  (r_dry_air*atm%layer_temperature(:,:,:,:))
+
+    !Calculate layer thickness.
+    allocate(atm%layer_thickness(block_size, atm%num_layers, num_blocks, atm%num_times))
+    atm%layer_thickness(:,:,:,:) = abs(atm%level_pressure(:,2:,:,:) - &
+                                   atm%level_pressure(:,:atm%num_layers,:,:))/ &
+                                   (air_density(:,:,:,:)*9.81)
+
+    !Read in and calculate cloud inputs.
+    err = nf90_open(buffer, nf90_nowrite, ncid)
+    call netcdf_catch(err)
+    start(1) = x_start; start(2) = y_start; start(3) = z_start; start(4) = t_start;
+    counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_layers; counts(4) = atm%num_times;
+    call variable_data(ncid, "cc", cloud_fraction, start, counts)
+    allocate(atm%cloud_fraction(block_size, atm%num_layers, num_blocks, atm%num_times))
+    call xyzt_to_bznt(atm%cloud_fraction, cloud_fraction)
+    deallocate(cloud_fraction)
+    call variable_data(ncid, "ciwc", abundance, start, counts)
+    allocate(atm%cloud_ice_content(block_size, atm%num_layers, num_blocks, atm%num_times))
+    call xyzt_to_bznt(atm%cloud_ice_content, abundance)
+    deallocate(abundance)
+    atm%cloud_ice_content(:,:,:,:) = air_density(:,:,:,:)*atm%cloud_ice_content(:,:,:,:)*kg_to_g
+    call variable_data(ncid, "clwc", abundance, start, counts)
+    allocate(atm%cloud_liquid_content(block_size, atm%num_layers, num_blocks, atm%num_times))
+    call xyzt_to_bznt(atm%cloud_liquid_content, abundance)
+    deallocate(abundance)
+    atm%cloud_liquid_content(:,:,:,:) = air_density(:,:,:,:)*atm%cloud_liquid_content(:,:,:,:)*kg_to_g
+    deallocate(air_density)
+    err = nf90_close(ncid)
+    call netcdf_catch(err)
+  endif
+  deallocate(xh2o)
 end subroutine create_atmosphere
 
 
@@ -714,9 +787,13 @@ subroutine destroy_atmosphere(atm)
 
   type(Atmosphere_t), intent(inout) :: atm
 
+  if (allocated(atm%cloud_fraction)) deallocate(atm%cloud_fraction)
+  if (allocated(atm%cloud_ice_content)) deallocate(atm%cloud_ice_content)
+  if (allocated(atm%cloud_liquid_content)) deallocate(atm%cloud_liquid_content)
   if (allocated(atm%latitude)) deallocate(atm%latitude)
   if (allocated(atm%layer_pressure)) deallocate(atm%layer_pressure)
   if (allocated(atm%layer_temperature)) deallocate(atm%layer_temperature)
+  if (allocated(atm%layer_thickness)) deallocate(atm%layer_thickness)
   if (allocated(atm%level)) deallocate(atm%level)
   if (allocated(atm%level_pressure)) deallocate(atm%level_pressure)
   if (allocated(atm%level_temperature)) deallocate(atm%level_temperature)

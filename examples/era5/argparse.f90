@@ -168,7 +168,7 @@ end subroutine help_mesg
 subroutine usage_mesg(parser)
   type(Parser_t), intent(inout) :: parser !< Parser object.
   type(Argument_t), pointer :: arg
-  character(len=512) :: buf
+  character(len=1024) :: buf
   character(len=512) :: b
   call get_command_argument(0, buf)
   call string_copy(buf, "Usage: "//trim(buf))

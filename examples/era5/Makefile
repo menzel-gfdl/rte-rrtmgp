@@ -1,5 +1,5 @@
-AM_FCFLAGS = -check all -warn all
-#AM_FCFLAGS = -warn all
+AM_FCFLAGS = -check all -warn all -traceback
+#AM_FCFLAGS = -warn all -traceback
 
 all: era5
 

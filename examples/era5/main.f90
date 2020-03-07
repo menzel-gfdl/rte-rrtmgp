@@ -58,9 +58,7 @@ integer :: band
 type(IncompleteBeta) :: beta
 integer :: beta_shape
 type(OpticalProperties), dimension(:), allocatable :: cloud_ice_optics
-type(OpticalProperties), dimension(:), allocatable :: cloud_ice_optics_rrtmgp
 type(OpticalProperties), dimension(:), allocatable :: cloud_liquid_optics
-type(OpticalProperties), dimension(:), allocatable :: cloud_liquid_optics_rrtmgp
 real(kind=real64), dimension(:), allocatable :: ice_content
 type(IceCloudOptics) :: ice_parameterization
 real(kind=real64) :: ice_radius
@@ -68,14 +66,27 @@ real(kind=real64), dimension(:), allocatable :: liquid_content
 type(HuStamnes) :: liquid_parameterization
 real(kind=real64) :: liquid_radius
 real(kind=real64), dimension(:), allocatable :: lw_rrtmgp_bands
+type(OpticalProperties), dimension(:), allocatable :: lw_cloud_ice_optics_rrtmgp
+type(OpticalProperties), dimension(:), allocatable :: lw_cloud_liquid_optics_rrtmgp
 integer :: num_subcolumns
 real(kind=real64), dimension(:), allocatable :: overlap
 real(kind=real64) :: scale_length
+real(kind=real64), dimension(:), allocatable :: sw_rrtmgp_bands
+type(OpticalProperties), dimension(:), allocatable :: sw_cloud_ice_optics_rrtmgp
+type(OpticalProperties), dimension(:), allocatable :: sw_cloud_liquid_optics_rrtmgp
 type(TotalWaterPDF) :: water_pdf
 
 type(ty_optical_props_1scl) :: lw_allsky_optics
+type(ty_optical_props_2str) :: sw_allsky_optics
 type(ty_source_func_lw) :: lw_allsky_source
 type(ty_fluxes_broadband) :: lw_allsky_fluxes
+type(ty_fluxes_broadband) :: sw_allsky_fluxes
+real(kind=real64), dimension(:), allocatable :: tau_liquid
+real(kind=real64), dimension(:), allocatable :: omega_liquid
+real(kind=real64), dimension(:), allocatable :: g_liquid
+real(kind=real64), dimension(:), allocatable :: tau_ice
+real(kind=real64), dimension(:), allocatable :: omega_ice
+real(kind=real64), dimension(:), allocatable :: g_ice
 
 !Fluxes.
 real(kind=real64), dimension(:,:), allocatable :: diffuse_albedo
@@ -103,7 +114,7 @@ call add_argument(parser, "-o", "Output file.", .true., "--output")
 call add_argument(parser, "-p", "Beta distribution shape parameter.", .true.)
 call add_argument(parser, "-r-liquid", "Cloud liquid drop radius (microns).", .true.)
 call add_argument(parser, "-r-ice", "Cloud ice particle radius (microns).", .true.)
-call add_argument(parser, "-s", "Overlap parameter scale length.", .true.)
+call add_argument(parser, "-s", "Overlap parameter scale length [km].", .true.)
 call create_atmosphere(atm, parser)
 
 !Set the gas names.
@@ -253,33 +264,56 @@ if (.not. atm%clear) then
   enddo
   allocate(lw_rrtmgp_bands(num_lw_bands))
   lw_rrtmgp_bands(:) = 0.5*(lw_optics%band_lims_wvn(1,:) + lw_optics%band_lims_wvn(2,:))
-  allocate(cloud_ice_optics_rrtmgp(atm%num_layers))
+  allocate(lw_cloud_ice_optics_rrtmgp(atm%num_layers))
   do i = 1, atm%num_layers
-    call cloud_ice_optics_rrtmgp(i)%construct(lw_rrtmgp_bands, &
-                                              lw_optics%band_lims_wvn)
+    call lw_cloud_ice_optics_rrtmgp(i)%construct(lw_rrtmgp_bands, &
+                                                 lw_optics%band_lims_wvn)
+  enddo
+  allocate(sw_rrtmgp_bands(num_sw_bands))
+  sw_rrtmgp_bands(:) = 0.5*(sw_optics%band_lims_wvn(1,:) + sw_optics%band_lims_wvn(2,:))
+  allocate(sw_cloud_ice_optics_rrtmgp(atm%num_layers))
+  do i = 1, atm%num_layers
+    call sw_cloud_ice_optics_rrtmgp(i)%construct(sw_rrtmgp_bands, &
+                                                 sw_optics%band_lims_wvn)
   enddo
   allocate(cloud_liquid_optics(atm%num_layers))
   do i = 1, atm%num_layers
     call cloud_liquid_optics(i)%construct(liquid_parameterization%bands, &
                                           liquid_parameterization%band_limits)
   enddo
-  allocate(cloud_liquid_optics_rrtmgp(atm%num_layers))
+  allocate(lw_cloud_liquid_optics_rrtmgp(atm%num_layers))
   do i = 1, atm%num_layers
-    call cloud_liquid_optics_rrtmgp(i)%construct(lw_rrtmgp_bands, &
-                                                 lw_optics%band_lims_wvn)
+    call lw_cloud_liquid_optics_rrtmgp(i)%construct(lw_rrtmgp_bands, &
+                                                    lw_optics%band_lims_wvn)
   enddo
   deallocate(lw_rrtmgp_bands)
+  allocate(sw_cloud_liquid_optics_rrtmgp(atm%num_layers))
+  do i = 1, atm%num_layers
+    call sw_cloud_liquid_optics_rrtmgp(i)%construct(sw_rrtmgp_bands, &
+                                                    sw_optics%band_lims_wvn)
+  enddo
+  deallocate(sw_rrtmgp_bands)
   allocate(liquid_content(atm%num_layers))
   allocate(ice_content(atm%num_layers))
   allocate(overlap(atm%num_layers-1))
+  allocate(tau_liquid(atm%num_layers))
+  allocate(omega_liquid(atm%num_layers))
+  allocate(g_liquid(atm%num_layers))
+  allocate(tau_ice(atm%num_layers))
+  allocate(omega_ice(atm%num_layers))
+  allocate(g_ice(atm%num_layers))
 
   !Optics types that interface with rte.
   error = lw_allsky_optics%alloc_1scl(1, atm%num_layers, lw_k)
+  call catch(error)
+  error = sw_allsky_optics%alloc_2str(1, atm%num_layers, sw_k)
   call catch(error)
   error = lw_allsky_source%alloc(1, atm%num_layers, lw_k)
   call catch(error)
   allocate(lw_allsky_fluxes%flux_dn(1, atm%num_levels))
   allocate(lw_allsky_fluxes%flux_up(1, atm%num_levels))
+  allocate(sw_allsky_fluxes%flux_dn(1, atm%num_levels))
+  allocate(sw_allsky_fluxes%flux_up(1, atm%num_levels))
 endif
 
 !Initialize fluxes.
@@ -309,78 +343,6 @@ do t = 1, atm%num_times
                             atm%layer_temperature(:,:,i,t), atm%surface_temperature(:,i,t), &
                             ppmv, lw_optics, source, tlev=atm%level_temperature(:,:,i,t))
     call catch(error)
-    if (atm%clear) then
-      error = rte_lw(lw_optics, .true., source, emissivity, lw_fluxes, n_gauss_angles=1)
-      call catch(error)
-    else
-      do j = 1, block_size
-        lw_fluxes%flux_dn(j,:) = 0.
-        lw_fluxes%flux_up(j,:) = 0.
-
-        !Generate stochastic subcolumns, calculate cloud optics, add to clear-sky optics,
-        !and calculate fluxes.
-        altitude(:) = log(atm%layer_pressure(j,:,i,t))
-        call overlap_parameter(altitude(:), scale_length, overlap(:))
-        do k = 1, num_subcolumns
-          !Generate a random subcolumn from the grid-cell mean cloud amounts.
-          call water_pdf%sample_condensate(atm%cloud_fraction(j,:,i,t), &
-                                           atm%cloud_liquid_content(j,:,i,t), &
-                                           atm%cloud_ice_content(j,:,i,t), &
-                                           overlap(:), liquid_content(:), ice_content(:))
-          do m = 1, atm%num_layers
-            if (liquid_content(m) .gt. 0._real64) then
-              !Calculate liquid cloud optics where there are liquid clouds.
-              call liquid_parameterization%optics(liquid_content(m), liquid_radius, &
-                                                  cloud_liquid_optics(m))
-              !Convert from parameterization bands to RRTMGP bands.
-              call cloud_liquid_optics(m)%thick_average(cloud_liquid_optics_rrtmgp(m))
-            else
-              cloud_liquid_optics_rrtmgp(m)%extinction_coefficient(:) = 0.
-              cloud_liquid_optics_rrtmgp(m)%single_scatter_albedo(:) = 0.
-              cloud_liquid_optics_rrtmgp(m)%asymmetry_factor(:) = 0.
-            endif
-            if (ice_content(m) .gt. 0._real64) then
-              !Calculate ice cloud optics where there are ice clouds.
-              call ice_parameterization%optics(ice_content(m), ice_radius, &
-                                               cloud_ice_optics(m))
-              !Convert from parameterization bands to RRTMGP bands.
-              call cloud_ice_optics(m)%thick_average(cloud_ice_optics_rrtmgp(m))
-            else
-              cloud_ice_optics_rrtmgp(m)%extinction_coefficient(:) = 0.
-              cloud_ice_optics_rrtmgp(m)%single_scatter_albedo(:) = 0.
-              cloud_ice_optics_rrtmgp(m)%asymmetry_factor(:) = 0.
-            endif
-          enddo
-
-          !Add clear-sky and cloud optics.
-          do m = 1, num_lw_gpoints
-            band = lw_optics%convert_gpt2band(m)
-            lw_allsky_optics%tau(1,:,m) = lw_optics%tau(j,:,m) + &
-              cloud_liquid_optics_rrtmgp(:)%extinction_coefficient(band)*atm%layer_thickness(j,:,i,t) + &
-              cloud_ice_optics_rrtmgp(:)%extinction_coefficient(band)*atm%layer_thickness(j,:,i,t)
-          enddo
-
-          !Calculate the fluxes in the subcolumn.
-          lw_allsky_source%lay_source(1,:,:) = source%lay_source(j,:,:)
-          lw_allsky_source%lev_source_inc(1,:,:) = source%lev_source_inc(j,:,:)
-          lw_allsky_source%lev_source_dec(1,:,:) = source%lev_source_dec(j,:,:)
-          lw_allsky_source%sfc_source(1,:) = source%sfc_source(j,:)
-          lw_allsky_fluxes%flux_dn(:,:) = 0.
-          lw_allsky_fluxes%flux_up(:,:) = 0.
-          error = rte_lw(lw_allsky_optics, .true., lw_allsky_source, emissivity(:,j:j), &
-                         lw_allsky_fluxes, n_gauss_angles=1)
-          call catch(error)
-          lw_fluxes%flux_dn(j,:) = lw_fluxes%flux_dn(j,:) + lw_allsky_fluxes%flux_dn(1,:)
-          lw_fluxes%flux_up(j,:) = lw_fluxes%flux_up(j,:) + lw_allsky_fluxes%flux_up(1,:)
-        enddo
-        lw_fluxes%flux_dn(j,:) = lw_fluxes%flux_dn(j,:)/num_subcolumns
-        lw_fluxes%flux_up(j,:) = lw_fluxes%flux_up(j,:)/num_subcolumns
-      enddo
-    endif
-    do j = 1, block_size
-      call write_output(output, rld, lw_fluxes%flux_dn, t, j, i)
-      call write_output(output, rlu, lw_fluxes%flux_up, t, j, i)
-    enddo
 
     !Shortwave clear-sky optics.
     error = sw_k%gas_optics(atm%layer_pressure(:,:,i,t), atm%level_pressure(:,:,i,t), &
@@ -407,18 +369,120 @@ do t = 1, atm%num_times
         diffuse_albedo(j,:) = atm%surface_albedo_diffuse_uv(:,i,t)
       endif
     enddo
+
     if (atm%clear) then
-!     error = rte_sw(sw_optics, .true., zenith, toa, direct_albedo, diffuse_albedo, sw_fluxes)
+      !Clear-sky fluxes.
+      error = rte_lw(lw_optics, .true., source, emissivity, lw_fluxes, n_gauss_angles=1)
+      call catch(error)
+      error = rte_sw(sw_optics, .true., zenith, toa, direct_albedo, diffuse_albedo, sw_fluxes)
       call catch(error)
     else
-      !Generate stochastic subcolumns, calculate cloud optics, add to clear-sky optics,
-      !and calculate fluxes.
-      do k = 1, num_subcolumns
+      !All-sky fluxes, using stochastic subcolumns.
+      do j = 1, block_size
+        lw_fluxes%flux_dn(j,:) = 0.
+        lw_fluxes%flux_up(j,:) = 0.
+        sw_fluxes%flux_dn(j,:) = 0.
+        sw_fluxes%flux_up(j,:) = 0.
 
+        altitude(:) = log(atm%layer_pressure(j,:,i,t))
+        call overlap_parameter(altitude(:), scale_length, overlap(:))
+        do k = 1, num_subcolumns
+          !Generate a random subcolumn from the grid-cell mean cloud amounts.
+          call water_pdf%sample_condensate(atm%cloud_fraction(j,:,i,t), &
+                                           atm%cloud_liquid_content(j,:,i,t), &
+                                           atm%cloud_ice_content(j,:,i,t), &
+                                           overlap(:), liquid_content(:), ice_content(:))
+          do m = 1, atm%num_layers
+            if (liquid_content(m) .gt. 0._real64) then
+              !Calculate liquid cloud optics where there are liquid clouds.
+              call liquid_parameterization%optics(liquid_content(m), liquid_radius, &
+                                                  cloud_liquid_optics(m))
+              !Convert from parameterization bands to RRTMGP bands.
+              call cloud_liquid_optics(m)%thick_average(lw_cloud_liquid_optics_rrtmgp(m))
+              call cloud_liquid_optics(m)%thick_average(sw_cloud_liquid_optics_rrtmgp(m))
+            else
+              lw_cloud_liquid_optics_rrtmgp(m)%extinction_coefficient(:) = 0.
+              lw_cloud_liquid_optics_rrtmgp(m)%single_scatter_albedo(:) = 0.
+              lw_cloud_liquid_optics_rrtmgp(m)%asymmetry_factor(:) = 0.
+              sw_cloud_liquid_optics_rrtmgp(m)%extinction_coefficient(:) = 0.
+              sw_cloud_liquid_optics_rrtmgp(m)%single_scatter_albedo(:) = 0.
+              sw_cloud_liquid_optics_rrtmgp(m)%asymmetry_factor(:) = 0.
+            endif
+            if (ice_content(m) .gt. 0._real64) then
+              !Calculate ice cloud optics where there are ice clouds.
+              call ice_parameterization%optics(ice_content(m), ice_radius, &
+                                               cloud_ice_optics(m))
+              !Convert from parameterization bands to RRTMGP bands.
+              call cloud_ice_optics(m)%thick_average(lw_cloud_ice_optics_rrtmgp(m))
+              call cloud_ice_optics(m)%thick_average(sw_cloud_ice_optics_rrtmgp(m))
+            else
+              lw_cloud_ice_optics_rrtmgp(m)%extinction_coefficient(:) = 0.
+              lw_cloud_ice_optics_rrtmgp(m)%single_scatter_albedo(:) = 0.
+              lw_cloud_ice_optics_rrtmgp(m)%asymmetry_factor(:) = 0.
+              sw_cloud_ice_optics_rrtmgp(m)%extinction_coefficient(:) = 0.
+              sw_cloud_ice_optics_rrtmgp(m)%single_scatter_albedo(:) = 0.
+              sw_cloud_ice_optics_rrtmgp(m)%asymmetry_factor(:) = 0.
+            endif
+          enddo
 
+          !Add clear-sky and cloud optics.
+          do m = 1, num_lw_gpoints
+            band = lw_optics%convert_gpt2band(m)
+            tau_liquid(:) = lw_cloud_liquid_optics_rrtmgp(:)%extinction_coefficient(band)* &
+                            atm%layer_thickness(j,:,i,t)
+            tau_ice(:) = lw_cloud_ice_optics_rrtmgp(:)%extinction_coefficient(band)* &
+                         atm%layer_thickness(j,:,i,t)
+            lw_allsky_optics%tau(1,:,m) = lw_optics%tau(j,:,m) + tau_liquid(:) + tau_ice(:)
+          enddo
+          do m = 1, num_sw_gpoints
+            band = sw_optics%convert_gpt2band(m)
+            tau_liquid(:) = sw_cloud_liquid_optics_rrtmgp(:)%extinction_coefficient(band)* &
+                            atm%layer_thickness(j,:,i,t)
+            omega_liquid(:) = sw_cloud_liquid_optics_rrtmgp(:)%single_scatter_albedo(band)
+            g_liquid(:) = sw_cloud_liquid_optics_rrtmgp(:)%asymmetry_factor(band)
+            tau_ice(:) = sw_cloud_ice_optics_rrtmgp(:)%extinction_coefficient(band)* &
+                         atm%layer_thickness(j,:,i,t)
+            omega_ice(:) = sw_cloud_ice_optics_rrtmgp(:)%single_scatter_albedo(band)
+            g_ice(:) = sw_cloud_ice_optics_rrtmgp(:)%asymmetry_factor(band)
+            sw_allsky_optics%tau(1,:,m) = sw_optics%tau(j,:,m) + tau_liquid(:) + tau_ice(:)
+            sw_allsky_optics%ssa(1,:,m) = sw_optics%tau(j,:,m)*sw_optics%ssa(j,:,m) + &
+              tau_liquid(:)*omega_liquid(:) + tau_ice(:)*omega_ice(:)
+            sw_allsky_optics%g(1,:,m) = sw_optics%tau(j,:,m)*sw_optics%ssa(j,:,m)*sw_optics%g(j,:,m) + &
+              tau_liquid(:)*omega_liquid(:)*g_liquid(:) + tau_ice(:)*omega_ice(:)*g_ice(:)
+            sw_allsky_optics%g(1,:,m) = sw_allsky_optics%g(1,:,m)/sw_allsky_optics%ssa(1,:,m)
+            sw_allsky_optics%ssa(1,:,m) = sw_allsky_optics%ssa(1,:,m)/sw_allsky_optics%tau(1,:,m)
+          enddo
+
+          !Calculate the fluxes in the subcolumn.
+          lw_allsky_source%lay_source(1,:,:) = source%lay_source(j,:,:)
+          lw_allsky_source%lev_source_inc(1,:,:) = source%lev_source_inc(j,:,:)
+          lw_allsky_source%lev_source_dec(1,:,:) = source%lev_source_dec(j,:,:)
+          lw_allsky_source%sfc_source(1,:) = source%sfc_source(j,:)
+          lw_allsky_fluxes%flux_dn(:,:) = 0.
+          lw_allsky_fluxes%flux_up(:,:) = 0.
+          error = rte_lw(lw_allsky_optics, .true., lw_allsky_source, emissivity(:,j:j), &
+                         lw_allsky_fluxes, n_gauss_angles=1)
+          call catch(error)
+          lw_fluxes%flux_dn(j,:) = lw_fluxes%flux_dn(j,:) + lw_allsky_fluxes%flux_dn(1,:)
+          lw_fluxes%flux_up(j,:) = lw_fluxes%flux_up(j,:) + lw_allsky_fluxes%flux_up(1,:)
+
+          sw_allsky_fluxes%flux_dn(:,:) = 0.
+          sw_allsky_fluxes%flux_up(:,:) = 0.
+          error = rte_sw(sw_allsky_optics, .true., zenith(j:j), toa(j:j,:), &
+                         direct_albedo(:,j:j), diffuse_albedo(:,j:j), sw_allsky_fluxes)
+          call catch(error)
+          sw_fluxes%flux_dn(j,:) = sw_fluxes%flux_dn(j,:) + sw_allsky_fluxes%flux_dn(1,:)
+          sw_fluxes%flux_up(j,:) = sw_fluxes%flux_up(j,:) + sw_allsky_fluxes%flux_up(1,:)
+        enddo
+        lw_fluxes%flux_dn(j,:) = lw_fluxes%flux_dn(j,:)/num_subcolumns
+        lw_fluxes%flux_up(j,:) = lw_fluxes%flux_up(j,:)/num_subcolumns
+        sw_fluxes%flux_dn(j,:) = sw_fluxes%flux_dn(j,:)/num_subcolumns
+        sw_fluxes%flux_up(j,:) = sw_fluxes%flux_up(j,:)/num_subcolumns
       enddo
     endif
     do j = 1, block_size
+      call write_output(output, rld, lw_fluxes%flux_dn, t, j, i)
+      call write_output(output, rlu, lw_fluxes%flux_up, t, j, i)
       if (atm%solar_zenith_angle(j,i,t) .lt. min_cos_zenith) then
         sw_fluxes%flux_dn(j,:) = 0._real64
         sw_fluxes%flux_up(j,:) = 0._real64
@@ -437,30 +501,47 @@ if (.not. atm%clear) then
     call cloud_ice_optics(i)%destruct()
   enddo
   deallocate(cloud_ice_optics)
-  do i = 1, size(cloud_ice_optics_rrtmgp)
-    call cloud_ice_optics_rrtmgp(i)%destruct()
+  do i = 1, size(lw_cloud_ice_optics_rrtmgp)
+    call lw_cloud_ice_optics_rrtmgp(i)%destruct()
   enddo
-  deallocate(cloud_ice_optics_rrtmgp)
+  deallocate(lw_cloud_ice_optics_rrtmgp)
+  do i = 1, size(sw_cloud_ice_optics_rrtmgp)
+    call sw_cloud_ice_optics_rrtmgp(i)%destruct()
+  enddo
+  deallocate(sw_cloud_ice_optics_rrtmgp)
   do i = 1, size(cloud_liquid_optics)
     call cloud_liquid_optics(i)%destruct()
   enddo
   deallocate(cloud_liquid_optics)
-  do i = 1, size(cloud_liquid_optics_rrtmgp)
-    call cloud_liquid_optics_rrtmgp(i)%destruct()
+  do i = 1, size(lw_cloud_liquid_optics_rrtmgp)
+    call lw_cloud_liquid_optics_rrtmgp(i)%destruct()
   enddo
-  deallocate(cloud_liquid_optics_rrtmgp)
+  deallocate(lw_cloud_liquid_optics_rrtmgp)
+  do i = 1, size(sw_cloud_liquid_optics_rrtmgp)
+    call sw_cloud_liquid_optics_rrtmgp(i)%destruct()
+  enddo
+  deallocate(sw_cloud_liquid_optics_rrtmgp)
   deallocate(ice_content)
   deallocate(liquid_content)
   deallocate(overlap)
+  deallocate(tau_liquid)
+  deallocate(omega_liquid)
+  deallocate(g_liquid)
+  deallocate(tau_ice)
+  deallocate(omega_ice)
+  deallocate(g_ice)
   call beta%destruct()
   call water_pdf%destruct()
   call liquid_parameterization%destruct()
   call ice_parameterization%destruct()
 
   call lw_allsky_optics%finalize()
+  call sw_allsky_optics%finalize()
   call lw_allsky_source%finalize()
   deallocate(lw_allsky_fluxes%flux_dn)
   deallocate(lw_allsky_fluxes%flux_up)
+  deallocate(sw_allsky_fluxes%flux_dn)
+  deallocate(sw_allsky_fluxes%flux_up)
 endif
 
 call destroy_atmosphere(atm)

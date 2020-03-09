@@ -398,8 +398,10 @@ do t = 1, atm%num_times
               call liquid_parameterization%optics(liquid_content(m), liquid_radius, &
                                                   cloud_liquid_optics(m))
               !Convert from parameterization bands to RRTMGP bands.
-              call cloud_liquid_optics(m)%thick_average(lw_cloud_liquid_optics_rrtmgp(m))
-              call cloud_liquid_optics(m)%thick_average(sw_cloud_liquid_optics_rrtmgp(m))
+              call cloud_liquid_optics(m)%thick_average(lw_cloud_liquid_optics_rrtmgp(m), &
+                                                        ending_band=ice_parameterization%last_ir_band)
+              call cloud_liquid_optics(m)%thick_average(sw_cloud_liquid_optics_rrtmgp(m), &
+                                                        starting_band=ice_parameterization%last_ir_band+1)
             else
               lw_cloud_liquid_optics_rrtmgp(m)%extinction_coefficient(:) = 0.
               lw_cloud_liquid_optics_rrtmgp(m)%single_scatter_albedo(:) = 0.
@@ -413,8 +415,10 @@ do t = 1, atm%num_times
               call ice_parameterization%optics(ice_content(m), ice_radius, &
                                                cloud_ice_optics(m))
               !Convert from parameterization bands to RRTMGP bands.
-              call cloud_ice_optics(m)%thick_average(lw_cloud_ice_optics_rrtmgp(m))
-              call cloud_ice_optics(m)%thick_average(sw_cloud_ice_optics_rrtmgp(m))
+              call cloud_ice_optics(m)%thick_average(lw_cloud_ice_optics_rrtmgp(m), &
+                                                     ending_band=ice_parameterization%last_ir_band)
+              call cloud_ice_optics(m)%thick_average(sw_cloud_ice_optics_rrtmgp(m), &
+                                                     starting_band=ice_parameterization%last_ir_band+1)
             else
               lw_cloud_ice_optics_rrtmgp(m)%extinction_coefficient(:) = 0.
               lw_cloud_ice_optics_rrtmgp(m)%single_scatter_albedo(:) = 0.
@@ -449,8 +453,16 @@ do t = 1, atm%num_times
               tau_liquid(:)*omega_liquid(:) + tau_ice(:)*omega_ice(:)
             sw_allsky_optics%g(1,:,m) = sw_optics%tau(j,:,m)*sw_optics%ssa(j,:,m)*sw_optics%g(j,:,m) + &
               tau_liquid(:)*omega_liquid(:)*g_liquid(:) + tau_ice(:)*omega_ice(:)*g_ice(:)
-            sw_allsky_optics%g(1,:,m) = sw_allsky_optics%g(1,:,m)/sw_allsky_optics%ssa(1,:,m)
-            sw_allsky_optics%ssa(1,:,m) = sw_allsky_optics%ssa(1,:,m)/sw_allsky_optics%tau(1,:,m)
+            where (sw_allsky_optics%ssa(1,:,m) .gt. 0.)
+              sw_allsky_optics%g(1,:,m) = sw_allsky_optics%g(1,:,m)/sw_allsky_optics%ssa(1,:,m)
+            elsewhere
+              sw_allsky_optics%g(1,:,m) = 0.
+            endwhere
+            where (sw_allsky_optics%tau(1,:,m) .gt. 0.)
+              sw_allsky_optics%ssa(1,:,m) = sw_allsky_optics%ssa(1,:,m)/sw_allsky_optics%tau(1,:,m)
+            elsewhere
+              sw_allsky_optics%ssa(1,:,m) = 0.
+            endwhere
           enddo
 
           !Calculate the fluxes in the subcolumn.

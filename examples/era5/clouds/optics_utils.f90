@@ -72,39 +72,53 @@ end function interp
 
 !> @brief Creates a new OpticalProperties object on a new set of bands from the current
 !!        OpticalProperties object.
-elemental pure subroutine thick_average(self, optics)
+elemental pure subroutine thick_average(self, optics, starting_band, ending_band)
+
   class(OpticalProperties), intent(in) :: self
   type(OpticalProperties), intent(inout) :: optics !< Optical properties on input bands.
+  integer, intent(in), optional :: starting_band !< Index of lowest band to interpolate in.
+  integer, intent(in), optional :: ending_band !< Index of highest band to interpolate in.
 
+  integer :: a
+  integer :: b
   integer :: c
   integer :: i
   integer :: j
   integer :: k
-  integer :: m
   integer :: n
+
+  if (present(starting_band)) then
+    a = starting_band
+  else
+    a = 1
+  endif
+  if (present(ending_band)) then
+    b = ending_band
+  else
+    b = size(self%bands)
+  endif
 
   !Linearly interpolate for now.
   n = size(optics%bands)
   do i = 1, n
-    if (self%band_limits(1,1) .lt. optics%bands(i)) exit
+    if (self%band_limits(1,a) .lt. optics%bands(i)) exit
   enddo
   if (i .gt. 1) then
     !Use value from the first band in all new bands that are less than the first band's
     !lower limit.
-    optics%extinction_coefficient(:i-1) = self%extinction_coefficient(1)
-    optics%single_scatter_albedo(:i-1) = self%single_scatter_albedo(1)
-    optics%asymmetry_factor(:i-1) = self%asymmetry_factor(1)
+    optics%extinction_coefficient(:i-1) = self%extinction_coefficient(a)
+    optics%single_scatter_albedo(:i-1) = self%single_scatter_albedo(a)
+    optics%asymmetry_factor(:i-1) = self%asymmetry_factor(a)
   endif
-  m = size(self%bands)
-  c = 1
+  c = a
   do j = i, n
-    if (self%band_limits(2,m) .lt. optics%bands(j)) exit
-    do k = c, m
-      if (self%band_limits(1,k) .le. optics%bands(j) .and. self%band_limits(2,k) .ge. &
-          optics%bands(j)) exit
+    if (optics%bands(j) .gt. self%band_limits(2,b)) exit
+    do k = c, b
+      if (self%bands(k) .gt. optics%bands(j)) exit
     enddo
     c = k
-    if (k .eq. 1) k = 2
+    if (k .eq. a) k = a + 1
+    if (k .eq. b + 1) k = b
     optics%extinction_coefficient(j) = interp(self%bands(k-1:k), &
                                               self%extinction_coefficient(k-1:k), &
                                               optics%bands(j))
@@ -118,9 +132,9 @@ elemental pure subroutine thick_average(self, optics)
   if (j .le. n) then
     !Use value from the last band in all new bands that are greater than the last band's
     !upper limit.
-    optics%extinction_coefficient(j:) = self%extinction_coefficient(m)
-    optics%single_scatter_albedo(j:) = self%single_scatter_albedo(m)
-    optics%asymmetry_factor(j:) = self%asymmetry_factor(m)
+    optics%extinction_coefficient(j:) = self%extinction_coefficient(b)
+    optics%single_scatter_albedo(j:) = self%single_scatter_albedo(b)
+    optics%asymmetry_factor(j:) = self%asymmetry_factor(b)
   endif
 end subroutine thick_average
 

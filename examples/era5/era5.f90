@@ -30,6 +30,7 @@ type, public :: Atmosphere_t
   real(kind=real64), dimension(:,:,:,:,:), allocatable :: ppmv !< Molecular abundancee (block_size, level, num_blocks, time, molecule).
   real(kind=real64), dimension(:,:,:,:), allocatable :: reference_pressure !< Actual model pressure [mb] (lon, lat, level, time).
   real(kind=real64), dimension(:,:,:), allocatable :: solar_zenith_angle !< Solar zenith angle [degrees] (block_size, num_blocks, time).
+  real(kind=real64), dimension(:,:,:), allocatable :: surface_albedo !< Surface albedo (block_size, num_blocks, time).
   real(kind=real64), dimension(:,:,:), allocatable :: surface_albedo_diffuse_ir !< Surface albedo for infrared diffuse beam (block_size, num_blocks, time).
   real(kind=real64), dimension(:,:,:), allocatable :: surface_albedo_diffuse_uv !< Surface albedo for ultraviolet diffuse beam (block_size, num_blocks, time).
   real(kind=real64), dimension(:,:,:), allocatable :: surface_albedo_direct_ir !< Surface albedo for infrared direct beam (block_size, num_blocks, time).
@@ -362,7 +363,8 @@ subroutine create_atmosphere(atm, parser)
   real(kind=real64), dimension(:,:,:,:), allocatable :: pressure
   real(kind=real64), parameter :: r_dry_air = 287.058_real64 ![J kg-1 K-1].
   real(kind=real64), parameter :: r_h2o = 461.495_real64 ![J kg-1 K-1].
-  real(kind=real64), parameter :: seconds_per_day = 86400._real64 ![s day-1].
+! real(kind=real64), parameter :: seconds_per_day = 86400._real64 ![s day-1].
+  real(kind=real64), parameter :: seconds_per_hour = 3600._real64 ![s day-1].
   integer, dimension(4) :: start
   real(kind=real64), dimension(:,:,:), allocatable :: surface_pressure
   real(kind=real64), dimension(:,:,:), allocatable :: surface_temperature
@@ -388,6 +390,7 @@ subroutine create_atmosphere(atm, parser)
   !Add/parse command line arguments.
   call add_argument(parser, "level_file", "Input data file.")
   call add_argument(parser, "single_file", "Input data file.")
+  call add_argument(parser, "albedo_file", "Input data file.")
   call add_argument(parser, "ghg_file", "Input GHG data file.")
   call add_argument(parser, "-b", "Block size.", .true., "--block-size")
   call add_argument(parser, "-CFC-11", "Year for CFC-11 abundance.", .true.)
@@ -501,7 +504,7 @@ subroutine create_atmosphere(atm, parser)
   start(1) = 1; start(2) = 1; start(3) = t_start;
   counts(1) = global_nlon; counts(2) = global_nlat; counts(3) = atm%num_times;
   call variable_data(ncid, "tisr", irradiance, start(1:3), counts(1:3))
-  irradiance(:,:,:) = irradiance(:,:,:)/seconds_per_day
+  irradiance(:,:,:) = irradiance(:,:,:)/seconds_per_hour
   allocate(atm%total_solar_irradiance(atm%num_times))
   do i = 1, atm%num_times
     mean_irradiance = 0._real64
@@ -735,6 +738,19 @@ subroutine create_atmosphere(atm, parser)
     atm%ppmv(:,:,:,:,atm%num_molecules) = input_abundance*from_ppmv
   endif
 
+  !Read in the surface albedo from its own file.
+  call get_argument(parser, "albedo_file", buffer)
+  err = nf90_open(buffer, nf90_nowrite, ncid)
+  call netcdf_catch(err)
+  start(1) = x_start; start(2) = y_start; start(3) = t_start;
+  counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_times;
+  call variable_data(ncid, "fal", albedo, start(1:3), counts(1:3))
+  allocate(atm%surface_albedo(block_size, num_blocks, atm%num_times))
+  call xyt_to_bnt(atm%surface_albedo, albedo)
+  deallocate(albedo)
+  err = nf90_close(ncid)
+  call netcdf_catch(err)
+
   !Determine if the run is all-sky or clear-sky.
   call get_argument(parser, "-clouds", buffer)
   atm%clear = trim(buffer) .eq. "not present"
@@ -802,6 +818,7 @@ subroutine destroy_atmosphere(atm)
   if (allocated(atm%ppmv)) deallocate(atm%ppmv)
   if (allocated(atm%reference_pressure)) deallocate(atm%reference_pressure)
   if (allocated(atm%solar_zenith_angle)) deallocate(atm%solar_zenith_angle)
+  if (allocated(atm%surface_albedo)) deallocate(atm%surface_albedo)
   if (allocated(atm%surface_albedo_diffuse_ir)) deallocate(atm%surface_albedo_diffuse_ir)
   if (allocated(atm%surface_albedo_diffuse_uv)) deallocate(atm%surface_albedo_diffuse_uv)
   if (allocated(atm%surface_albedo_direct_ir)) deallocate(atm%surface_albedo_direct_ir)

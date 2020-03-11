@@ -70,6 +70,7 @@ type(OpticalProperties), dimension(:), allocatable :: lw_cloud_ice_optics_rrtmgp
 type(OpticalProperties), dimension(:), allocatable :: lw_cloud_liquid_optics_rrtmgp
 integer :: num_subcolumns
 real(kind=real64), dimension(:), allocatable :: overlap
+real(kind=real64), parameter :: pressure_scale_height = 7.3 ![km], taken from GFDL AM4.
 real(kind=real64) :: scale_length
 real(kind=real64), dimension(:), allocatable :: sw_rrtmgp_bands
 type(OpticalProperties), dimension(:), allocatable :: sw_cloud_ice_optics_rrtmgp
@@ -92,7 +93,8 @@ real(kind=real64), dimension(:), allocatable :: g_ice
 real(kind=real64), dimension(:,:), allocatable :: diffuse_albedo
 real(kind=real64), dimension(:,:), allocatable :: direct_albedo
 real(kind=real64), dimension(:,:), allocatable :: emissivity
-integer :: infrared_cutoff
+real(kind=real64), parameter :: infrared_cutoff = 1.e4/0.7 ![cm-1].
+integer :: infrared_cutoff_index
 real(kind=real64) :: input_emissivity
 type(ty_fluxes_broadband) :: lw_fluxes
 real(kind=real64), parameter :: min_cos_zenith = tiny(min_cos_zenith)
@@ -104,7 +106,6 @@ real(kind=real64), dimension(:), allocatable :: zenith
 parser = create_parser()
 call add_argument(parser, "lw_kdist_file", "Longwave k-distribution file.")
 call add_argument(parser, "sw_kdist_file", "Shortwave k-distribution file.")
-call add_argument(parser, "-a", "Index of last infrared band.", .true., "--last-ir-band")
 call add_argument(parser, "-beta", "Incomplete beta distribution file.", .true.)
 call add_argument(parser, "-e", "Emissivity.", .true.)
 call add_argument(parser, "-ice", "Ice cloud parameterization file.", .true.)
@@ -193,12 +194,14 @@ allocate(zenith(block_size))
 !Initialize albedos.
 allocate(diffuse_albedo(num_sw_bands, block_size))
 allocate(direct_albedo(num_sw_bands, block_size))
-call get_argument(parser, "-a", buffer)
-if (trim(buffer) .eq. "not present") then
-  infrared_cutoff = num_sw_bands/2 + 1
-else
-  read(buffer, *) infrared_cutoff
-endif
+infrared_cutoff_index = 1
+do i = 1, num_sw_bands
+  if (infrared_cutoff .ge. sw_optics%band_lims_wvn(1,i) .and. infrared_cutoff &
+      .le. sw_optics%band_lims_wvn(2,i)) then
+    infrared_cutoff_index = i
+    exit
+  endif
+enddo
 
 if (.not. atm%clear) then
   !Initialize cloud optics objects.
@@ -360,14 +363,29 @@ do t = 1, atm%num_times
     do j = 1, num_sw_gpoints
       toa(:,j) = toa(:,j)*atm%total_solar_irradiance(t)/total_irradiance(:)
     enddo
+!   do j = 1, num_sw_bands
+!     if (j .lt. infrared_cutoff_index) then
+!       direct_albedo(j,:) = atm%surface_albedo_direct_ir(:,i,t)
+!       diffuse_albedo(j,:) = atm%surface_albedo_diffuse_ir(:,i,t)
+!     elseif (j .gt. infrared_cutoff_index) then
+!       direct_albedo(j,:) = atm%surface_albedo_direct_uv(:,i,t)
+!       diffuse_albedo(j,:) = atm%surface_albedo_diffuse_uv(:,i,t)
+!     else
+!       direct_albedo(j,:) = (atm%surface_albedo_direct_ir(:,i,t)* &
+!                            (infrared_cutoff - sw_optics%band_lims_wvn(1,j)) + &
+!                            atm%surface_albedo_direct_uv(:,i,t)* &
+!                            (sw_optics%band_lims_wvn(2,j) - infrared_cutoff))/ &
+!                            (sw_optics%band_lims_wvn(2,j) - sw_optics%band_lims_wvn(1,j))
+!       diffuse_albedo(j,:) = (atm%surface_albedo_diffuse_ir(:,i,t)* &
+!                             (infrared_cutoff - sw_optics%band_lims_wvn(1,j)) + &
+!                             atm%surface_albedo_diffuse_uv(:,i,t)* &
+!                             (sw_optics%band_lims_wvn(2,j) - infrared_cutoff))/ &
+!                             (sw_optics%band_lims_wvn(2,j) - sw_optics%band_lims_wvn(1,j))
+!     endif
+!   enddo
     do j = 1, num_sw_bands
-      if (j .le. infrared_cutoff) then
-        direct_albedo(j,:) = atm%surface_albedo_direct_ir(:,i,t)
-        diffuse_albedo(j,:) = atm%surface_albedo_diffuse_ir(:,i,t)
-      else
-        direct_albedo(j,:) = atm%surface_albedo_direct_uv(:,i,t)
-        diffuse_albedo(j,:) = atm%surface_albedo_diffuse_uv(:,i,t)
-      endif
+      direct_albedo(j,:) = atm%surface_albedo(:,i,t)
+      diffuse_albedo(j,:) = atm%surface_albedo(:,i,t)
     enddo
 
     if (atm%clear) then
@@ -384,7 +402,7 @@ do t = 1, atm%num_times
         sw_fluxes%flux_dn(j,:) = 0.
         sw_fluxes%flux_up(j,:) = 0.
 
-        altitude(:) = log(atm%layer_pressure(j,:,i,t))
+        altitude(:) = log(atm%layer_pressure(j,:,i,t))*pressure_scale_height
         call overlap_parameter(altitude(:), scale_length, overlap(:))
         do k = 1, num_subcolumns
           !Generate a random subcolumn from the grid-cell mean cloud amounts.

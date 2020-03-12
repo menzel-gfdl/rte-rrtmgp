@@ -2,7 +2,7 @@
 module era5
 use, intrinsic :: iso_fortran_env, only: error_unit
 
-use netcdf
+use netcdf_utils
 
 use mo_rte_kind, only: wp
 
@@ -80,189 +80,7 @@ integer :: nlevel
 integer, public :: num_blocks
 
 
-interface variable_data
-  module procedure variable_data_double_1d
-  module procedure variable_data_double_3d
-  module procedure variable_data_double_4d
-end interface variable_data
-
-
 contains
-
-
-function dimension_length(ncid, name) result(length)
-
-  integer, intent(in) :: ncid
-  character(len=*), intent(in) :: name
-  integer :: length
-
-  integer :: dimid
-  integer :: err
-
-  err = nf90_inq_dimid(ncid, trim(name), dimid)
-  call netcdf_catch(err)
-  err = nf90_inquire_dimension(ncid, dimid, len=length)
-  call netcdf_catch(err)
-  return
-end function dimension_length
-
-
-subroutine netcdf_catch(err)
-
-  integer, intent(in) :: err
-
-  if (err .ne. NF90_NOERR) then
-    write(error_unit, *) nf90_strerror(err)
-    stop 1
-  endif
-end subroutine netcdf_catch
-
-
-subroutine variable_data_double_1d(ncid, name, buffer, start, counts)
-
-  integer, intent(in) :: ncid
-  character(len=*), intent(in) :: name
-  real(kind=wp), dimension(:), allocatable, intent(inout) :: buffer
-  integer, dimension(1), intent(in), optional :: start
-  integer, dimension(1), intent(in), optional :: counts
-
-  real(kind=wp) :: add
-  integer, dimension(1) :: dimids
-  integer :: err
-  integer :: i
-  real(kind=wp) :: scales
-  integer, dimension(1) :: sizes
-  integer :: varid
-
-  err = nf90_inq_varid(ncid, trim(name), varid)
-  call netcdf_catch(err)
-  if (present(counts)) then
-    sizes(:) = counts(:)
-  else
-    err = nf90_inquire_variable(ncid, varid, dimids=dimids)
-    call netcdf_catch(err)
-    do i = 1, size(dimids)
-      err = nf90_inquire_dimension(ncid, dimids(i), len=sizes(i))
-      call netcdf_catch(err)
-    enddo
-  endif
-  allocate(buffer(sizes(1)))
-  err = nf90_get_var(ncid, varid, buffer, start, sizes)
-  call netcdf_catch(err)
-  err = nf90_get_att(ncid, varid, "scale_factor", scales)
-  if (err .eq. nf90_enotatt) then
-    scales = 1._wp
-  else
-    call netcdf_catch(err)
-  endif
-  err = nf90_get_att(ncid, varid, "add_offset", add)
-  if (err .eq. nf90_enotatt) then
-    add = 0._wp
-  else
-    call netcdf_catch(err)
-  endif
-  if (scales .ne. 1._wp .or. add .ne. 0._wp) then
-    buffer(:) = buffer(:)*scales + add
-  endif
-end subroutine variable_data_double_1d
-
-
-subroutine variable_data_double_3d(ncid, name, buffer, start, counts)
-
-  integer, intent(in) :: ncid
-  character(len=*), intent(in) :: name
-  real(kind=wp), dimension(:,:,:), allocatable, intent(inout) :: buffer
-  integer, dimension(3), intent(in), optional :: start
-  integer, dimension(3), intent(in), optional :: counts
-
-  real(kind=wp) :: add
-  integer, dimension(3) :: dimids
-  integer :: err
-  integer :: i
-  real(kind=wp) :: scales
-  integer, dimension(3) :: sizes
-  integer :: varid
-
-  err = nf90_inq_varid(ncid, trim(name), varid)
-  call netcdf_catch(err)
-  if (present(counts)) then
-    sizes(:) = counts(:)
-  else
-    err = nf90_inquire_variable(ncid, varid, dimids=dimids)
-    call netcdf_catch(err)
-    do i = 1, size(dimids)
-      err = nf90_inquire_dimension(ncid, dimids(i), len=sizes(i))
-      call netcdf_catch(err)
-    enddo
-  endif
-  allocate(buffer(sizes(1), sizes(2), sizes(3)))
-  err = nf90_get_var(ncid, varid, buffer, start, sizes)
-  call netcdf_catch(err)
-  err = nf90_get_att(ncid, varid, "scale_factor", scales)
-  if (err .eq. nf90_enotatt) then
-    scales = 1._wp
-  else
-    call netcdf_catch(err)
-  endif
-  err = nf90_get_att(ncid, varid, "add_offset", add)
-  if (err .eq. nf90_enotatt) then
-    add = 0._wp
-  else
-    call netcdf_catch(err)
-  endif
-  if (scales .ne. 1._wp .or. add .ne. 0._wp) then
-    buffer(:,:,:) = buffer(:,:,:)*scales + add
-  endif
-end subroutine variable_data_double_3d
-
-
-subroutine variable_data_double_4d(ncid, name, buffer, start, counts)
-
-  integer, intent(in) :: ncid
-  character(len=*), intent(in) :: name
-  real(kind=wp), dimension(:,:,:,:), allocatable, intent(inout) :: buffer
-  integer, dimension(4), intent(in), optional :: start
-  integer, dimension(4), intent(in), optional :: counts
-
-  real(kind=wp) :: add
-  integer, dimension(4) :: dimids
-  integer :: err
-  integer :: i
-  real(kind=wp) :: scales
-  integer, dimension(4) :: sizes
-  integer :: varid
-
-  err = nf90_inq_varid(ncid, trim(name), varid)
-  call netcdf_catch(err)
-  if (present(counts)) then
-    sizes(:) = counts(:)
-  else
-    err = nf90_inquire_variable(ncid, varid, dimids=dimids)
-    call netcdf_catch(err)
-    do i = 1, size(dimids)
-      err = nf90_inquire_dimension(ncid, dimids(i), len=sizes(i))
-      call netcdf_catch(err)
-    enddo
-  endif
-  allocate(buffer(sizes(1), sizes(2), sizes(3), sizes(4)))
-  err = nf90_get_var(ncid, varid, buffer, start, sizes)
-  call netcdf_catch(err)
-  err = nf90_get_att(ncid, varid, "scale_factor", scales)
-  if (err .eq. nf90_enotatt) then
-    scales = 1._wp
-  else
-    call netcdf_catch(err)
-  endif
-  err = nf90_get_att(ncid, varid, "add_offset", add)
-  if (err .eq. nf90_enotatt) then
-    add = 0._wp
-  else
-    call netcdf_catch(err)
-  endif
-  if (scales .ne. 1._wp .or. add .ne. 0._wp) then
-    buffer(:,:,:,:) = buffer(:,:,:,:)*scales + add
-  endif
-end subroutine variable_data_double_4d
 
 
 subroutine xyt_to_bnt(dest, src)
@@ -324,6 +142,24 @@ subroutine xyzt_to_bznt(dest, src)
 end subroutine xyzt_to_bznt
 
 
+function input_index(parser, name, default) result(i)
+
+  type(Parser_t), intent(in) :: parser !< Parser.
+  character(len=*), intent(in) :: name !< Argument name.
+  integer, intent(in) :: default !< Default value.
+  integer :: i !< Index
+
+  character(len=valuelen) :: buffer
+
+  call get_argument(parser, trim(name), buffer)
+  if (trim(buffer) .eq. "not present") then
+    i = default
+  else
+    read(buffer, *) i
+  endif
+end function input_index
+
+
 !> @brief Reserve memory and read in atmospheric data.
 subroutine create_atmosphere(atm, parser)
 
@@ -337,31 +173,28 @@ subroutine create_atmosphere(atm, parser)
     real(kind=wp) :: mass
   end type MoleculeMeta_t
 
-  real(kind=wp), dimension(:,:,:,:), allocatable :: abundance
   real(kind=wp), dimension(:,:,:,:), allocatable :: air_density
-  real(kind=wp), dimension(:,:,:), allocatable :: albedo
   character(len=valuelen) :: buffer
-  real(kind=wp), dimension(:,:,:,:), allocatable :: cloud_fraction
+  real(kind=wp), dimension(:), allocatable :: buffer1d
+  real(kind=wp), dimension(:,:,:), allocatable :: buffer3d
+  real(kind=wp), dimension(:,:,:,:), allocatable :: buffer4d
   integer, dimension(4) :: counts
   real(kind=wp), parameter :: dry_air_mass = 28.9647_wp ![g mol-1].
   real(kind=wp), parameter :: from_ppmv = 1.e-6_wp
-  integer :: err
   integer :: global_nlat
   integer :: global_nlon
   integer :: i
   real(kind=wp) :: input_abundance
-  real(kind=wp), dimension(:,:,:), allocatable :: irradiance
   integer :: j
   integer :: k
   real(kind=wp), parameter :: kg_to_g = 1000._wp ![g kg-1].
-  real(kind=wp), dimension(:), allocatable :: latitude
   real(kind=wp), dimension(:,:,:,:), allocatable :: level_pressure
   real(kind=wp), dimension(:,:,:,:), allocatable :: level_temperature
-  integer :: m
   real(kind=wp), parameter :: mb_to_pa = 100._wp ![Pa mb-1].
   real(kind=wp) :: mean_irradiance
+  type(MoleculeMeta_t), dimension(num_molecules) :: molecules
   integer :: ncid
-  integer :: nlayer
+  real(kind=wp), parameter :: ozone_mass = 47.997_wp
   real(kind=wp), parameter :: pi = 3.14159265359_wp
   real(kind=wp), dimension(:,:,:,:), allocatable :: pressure
   real(kind=wp), parameter :: r_dry_air = 287.058_wp ![J kg-1 K-1].
@@ -370,7 +203,6 @@ subroutine create_atmosphere(atm, parser)
   real(kind=wp), parameter :: seconds_per_hour = 3600._wp ![s day-1].
   integer, dimension(4) :: start
   real(kind=wp), dimension(:,:,:), allocatable :: surface_pressure
-  real(kind=wp), dimension(:,:,:), allocatable :: surface_temperature
   integer :: t_start
   integer :: t_stop
   real(kind=wp), dimension(:,:,:,:), allocatable :: temperature
@@ -381,14 +213,12 @@ subroutine create_atmosphere(atm, parser)
   integer :: x_start
   integer :: x_stop
   real(kind=wp), dimension(:,:,:,:), allocatable :: xh2o
-  real(kind=wp), dimension(:), allocatable :: xmol
   integer :: y_start
   integer :: y_stop
   real(kind=wp) :: year
   integer :: z_start
   integer :: z_stop
   real(kind=wp), dimension(:,:,:), allocatable :: zenith
-  type(MoleculeMeta_t), dimension(num_molecules) :: molecules
 
   !Add/parse command line arguments.
   call add_argument(parser, "level_file", "Input data file.")
@@ -419,100 +249,66 @@ subroutine create_atmosphere(atm, parser)
 
   !Open the single file.
   call get_argument(parser, "single_file", buffer)
-  err = nf90_open(buffer, NF90_NOWRITE, ncid)
-  call netcdf_catch(err)
+  ncid = open_dataset(buffer)
 
   !Determine the number of times.
-  call get_argument(parser, "-t", buffer)
-  if (trim(buffer) .eq. "not present") then
-    t_start = 1
-  else
-    read(buffer, *) t_start
-  endif
-  call get_argument(parser, "-T", buffer)
-  if (trim(buffer) .eq. "not present") then
-    t_stop = dimension_length(ncid, "time")
-  else
-    read(buffer, *) t_stop
-  endif
+  t_start = input_index(parser, "-t", 1)
+  t_stop = input_index(parser, "-T", dimension_length(ncid, "time"))
   atm%num_times = t_stop - t_start + 1
 
   !Determine the number of columns.
-  call get_argument(parser, "-x", buffer)
-  if (trim(buffer) .eq. "not present") then
-    x_start = 1
-  else
-    read(buffer, *) x_start
-  endif
-  call get_argument(parser, "-X", buffer)
-  if (trim(buffer) .eq. "not present") then
-    x_stop = dimension_length(ncid, "lon")
-  else
-    read(buffer, *) x_stop
-  endif
-  call get_argument(parser, "-y", buffer)
-  if (trim(buffer) .eq. "not present") then
-    y_start = 1
-  else
-    read(buffer, *) y_start
-  endif
-  call get_argument(parser, "-Y", buffer)
-  if (trim(buffer) .eq. "not present") then
-    y_stop = dimension_length(ncid, "lat")
-  else
-    read(buffer, *) y_stop
-  endif
+  x_start = input_index(parser, "-x", 1)
+  x_stop = input_index(parser, "-X", dimension_length(ncid, "lon"))
   nlon = x_stop - x_start + 1
+  y_start = input_index(parser, "-y", 1)
+  y_stop = input_index(parser, "-Y", dimension_length(ncid, "lat"))
   nlat = y_stop - y_start + 1
   atm%num_columns = nlon*nlat;
 
   !Store axis data so it can be copied to the output file.
   start(1) = x_start; counts(1) = nlon;
-  call variable_data(ncid, "lon", atm%longitude, start(1:1), counts(1:1))
+  call read_variable(ncid, "lon", atm%longitude, start(1), counts(1))
   start(1) = y_start; counts(1) = nlat;
-  call variable_data(ncid, "lat", atm%latitude, start(1:1), counts(1:1))
+  call read_variable(ncid, "lat", atm%latitude, start(1), counts(1))
   start(1) = t_start; counts(1) = atm%num_times;
-  call variable_data(ncid, "time", atm%time, start(1:1), counts(1:1))
+  call read_variable(ncid, "time", atm%time, start(1), counts(1))
 
   !Determine mapping from columns to blocks.
   call get_argument(parser, "-b", buffer)
   if (trim(buffer) .eq. "not present") then
     block_size = 1
-    num_blocks = atm%num_columns
   else
     read(buffer, *) block_size
     if (mod(atm%num_columns, block_size) .ne. 0) then
       write(error_unit, *) "Block size must evenly divide into the number of columns."
       stop 1
     endif
-    num_blocks = atm%num_columns/block_size
   endif
+  num_blocks = atm%num_columns/block_size
 
   !Surface temperature.
   start(1) = x_start; start(2) = y_start; start(3) = t_start;
   counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_times;
-  call variable_data(ncid, "skt", surface_temperature, start(1:3), counts(1:3))
+  call read_variable(ncid, "skt", buffer3d, start(1:3), counts(1:3))
   allocate(atm%surface_temperature(block_size, num_blocks, atm%num_times))
-  call xyt_to_bnt(atm%surface_temperature, surface_temperature)
-  deallocate(surface_temperature)
+  call xyt_to_bnt(atm%surface_temperature, buffer3d)
 
   !Calculate the solar zenith angle and mean solar irradiance.
+  call read_variable(ncid, "lat", buffer1d)
+  global_nlat = size(buffer1d)
   global_nlon = dimension_length(ncid, "lon")
-  global_nlat = dimension_length(ncid, "lat")
-  call variable_data(ncid, "lat", latitude)
   allocate(weights(global_nlat))
-  weights(:) = cos(2._wp*pi*latitude(:)/360._wp)
+  weights(:) = cos(2._wp*pi*buffer1d(:)/360._wp)
   total_weight = sum(weights)
-  deallocate(latitude)
   start(1) = 1; start(2) = 1; start(3) = t_start;
   counts(1) = global_nlon; counts(2) = global_nlat; counts(3) = atm%num_times;
-  call variable_data(ncid, "tisr", irradiance, start(1:3), counts(1:3))
-  irradiance(:,:,:) = irradiance(:,:,:)/seconds_per_hour
+  call read_variable(ncid, "tisr", buffer3d, start(1:3), counts(1:3))
+  buffer3d(:,:,:) = buffer3d(:,:,:)/seconds_per_hour
   allocate(atm%total_solar_irradiance(atm%num_times))
   do i = 1, atm%num_times
     mean_irradiance = 0._wp
     do j = 1, global_nlat
-      mean_irradiance = mean_irradiance + sum(irradiance(:,j,i))*weights(j)
+      mean_irradiance = mean_irradiance + sum(buffer3d(:,j,i))*weights(j)
     enddo
     atm%total_solar_irradiance(i) = 4._wp*mean_irradiance/(global_nlon*total_weight)
   enddo
@@ -521,68 +317,51 @@ subroutine create_atmosphere(atm, parser)
   do k = 1, atm%num_times
     do j = 1, nlat
       do i = 1, nlon
-        zenith(i,j,k) = irradiance(i+x_start-1,j+y_start-1,k)/atm%total_solar_irradiance(k)
+        zenith(i,j,k) = buffer3d(i+x_start-1,j+y_start-1,k)/atm%total_solar_irradiance(k)
       enddo
     enddo
   enddo
-  deallocate(irradiance)
   allocate(atm%solar_zenith_angle(block_size, num_blocks, atm%num_times))
   call xyt_to_bnt(atm%solar_zenith_angle, zenith)
+  deallocate(zenith)
 
   !Albedos.
   start(1) = x_start; start(2) = y_start; start(3) = t_start;
   counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_times;
-  call variable_data(ncid, "alnid", albedo, start(1:3), counts(1:3))
+  call read_variable(ncid, "alnid", buffer3d, start(1:3), counts(1:3))
   allocate(atm%surface_albedo_diffuse_ir(block_size, num_blocks, atm%num_times))
-  call xyt_to_bnt(atm%surface_albedo_diffuse_ir, albedo)
-  deallocate(albedo)
-  call variable_data(ncid, "aluvd", albedo, start(1:3), counts(1:3))
+  call xyt_to_bnt(atm%surface_albedo_diffuse_ir, buffer3d)
+  call read_variable(ncid, "aluvd", buffer3d, start(1:3), counts(1:3))
   allocate(atm%surface_albedo_diffuse_uv(block_size, num_blocks, atm%num_times))
-  call xyt_to_bnt(atm%surface_albedo_diffuse_uv, albedo)
-  deallocate(albedo)
-  call variable_data(ncid, "alnip", albedo, start(1:3), counts(1:3))
+  call xyt_to_bnt(atm%surface_albedo_diffuse_uv, buffer3d)
+  call read_variable(ncid, "alnip", buffer3d, start(1:3), counts(1:3))
   allocate(atm%surface_albedo_direct_ir(block_size, num_blocks, atm%num_times))
-  call xyt_to_bnt(atm%surface_albedo_direct_ir, albedo)
-  deallocate(albedo)
-  call variable_data(ncid, "aluvp", albedo, start(1:3), counts(1:3))
+  call xyt_to_bnt(atm%surface_albedo_direct_ir, buffer3d)
+  call read_variable(ncid, "aluvp", buffer3d, start(1:3), counts(1:3))
   allocate(atm%surface_albedo_direct_uv(block_size, num_blocks, atm%num_times))
-  call xyt_to_bnt(atm%surface_albedo_direct_uv, albedo)
-  deallocate(albedo)
+  call xyt_to_bnt(atm%surface_albedo_direct_uv, buffer3d)
 
   !Surface pressure.
   start(1) = x_start; start(2) = y_start; start(3) = t_start;
   counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_times;
-  call variable_data(ncid, "sp", surface_pressure, start(1:3), counts(1:3))
+  call read_variable(ncid, "sp", surface_pressure, start(1:3), counts(1:3))
 
   !Two meter temperature;
   start(1) = x_start; start(2) = y_start; start(3) = t_start;
   counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_times;
-  call variable_data(ncid, "t2m", two_meter_temperature, start(1:3), counts(1:3))
+  call read_variable(ncid, "t2m", two_meter_temperature, start(1:3), counts(1:3))
 
   !Close the single file and open the level file.
-  err = nf90_close(ncid)
-  call netcdf_catch(err)
+  call close_dataset(ncid)
   call get_argument(parser, "level_file", buffer)
-  err = nf90_open(buffer, NF90_NOWRITE, ncid)
-  call netcdf_catch(err)
+  ncid = open_dataset(buffer)
 
   !Determine the number of layers.
-  call get_argument(parser, "-z", buffer)
-  if (trim(buffer) .eq. "not present") then
-    z_start = 1
-  else
-    read(buffer, *) z_start
-  endif
-  call get_argument(parser, "-Z", buffer)
-  if (trim(buffer) .eq. "not present") then
-    z_stop = dimension_length(ncid, "sigma_level")
-  else
-    read(buffer, *) z_stop
-  endif
-  nlayer = z_stop - z_start + 1
-  nlevel = nlayer + 1
+  z_start = input_index(parser, "-z", 1)
+  z_stop = input_index(parser, "-Z", dimension_length(ncid, "sigma_level"))
+  atm%num_layers = z_stop - z_start + 1
+  nlevel = atm%num_layers + 1
   atm%num_levels = nlevel
-  atm%num_layers = nlayer
 
   !Store axis data so it can be copied to the output file.
   allocate(atm%level(atm%num_levels))
@@ -593,7 +372,7 @@ subroutine create_atmosphere(atm, parser)
   !Pressure.
   start(1) = x_start; start(2) = y_start; start(3) = z_start; start(4) = t_start;
   counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_layers; counts(4) = atm%num_times;
-  call variable_data(ncid, "p", pressure, start, counts)
+  call read_variable(ncid, "p", pressure, start, counts)
   pressure(:,:,:,:) = mb_to_pa*pressure(:,:,:,:)
   allocate(atm%layer_pressure(block_size, atm%num_layers, num_blocks, atm%num_times))
   call xyzt_to_bznt(atm%layer_pressure, pressure)
@@ -601,15 +380,8 @@ subroutine create_atmosphere(atm, parser)
   level_pressure(:,:,1,:) = pressure(:,:,1,:)*0.5_wp
   level_pressure(:,:,atm%num_levels,:) = surface_pressure(:,:,:)
   deallocate(surface_pressure)
-  do m = 1, atm%num_times
-    do k = 2, atm%num_layers
-      do j = 1, nlat
-        do i = 1, nlon
-          level_pressure(i,j,k,m) = 0.5_wp*(pressure(i,j,k-1,m) + pressure(i,j,k,m))
-        enddo
-      enddo
-    enddo
-  enddo
+  level_pressure(:,:,2:atm%num_layers,:) = 0.5_wp*(pressure(:,:,:atm%num_layers-1,:) + &
+                                                   pressure(:,:,2:,:))
   allocate(atm%level_pressure(block_size, atm%num_levels, num_blocks, atm%num_times))
   call xyzt_to_bznt(atm%level_pressure, level_pressure)
   allocate(atm%reference_pressure(nlon, nlat, atm%num_levels, atm%num_times))
@@ -618,25 +390,17 @@ subroutine create_atmosphere(atm, parser)
   !Temperature.
   start(1) = x_start; start(2) = y_start; start(3) = z_start; start(4) = t_start;
   counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_layers; counts(4) = atm%num_times;
-  call variable_data(ncid, "t", temperature, start, counts)
+  call read_variable(ncid, "t", temperature, start, counts)
   allocate(atm%layer_temperature(block_size, atm%num_layers, num_blocks, atm%num_times))
   call xyzt_to_bznt(atm%layer_temperature, temperature)
   allocate(level_temperature(nlon, nlat, atm%num_levels, atm%num_times))
   level_temperature(:,:,1,:) = temperature(:,:,1,:)
   level_temperature(:,:,atm%num_levels,:) = two_meter_temperature(:,:,:)
   deallocate(two_meter_temperature)
-  do m = 1, atm%num_times
-    do k = 2, atm%num_layers
-      do j = 1, nlat
-        do i = 1, nlon
-          level_temperature(i,j,k,m) = temperature(i,j,k-1,m) + &
-                                       (temperature(i,j,k,m) - temperature(i,j,k-1,m))* &
-                                       (level_pressure(i,j,k,m) - pressure(i,j,k-1,m))/ &
-                                       (pressure(i,j,k,m) - pressure(i,j,k-1,m))
-        enddo
-      enddo
-    enddo
-  enddo
+  level_temperature(:,:,2:atm%num_layers,:) = temperature(:,:,:atm%num_layers-1,:) + &
+    (temperature(:,:,2:,:) - temperature(:,:,:atm%num_layers-1,:))* &
+    (level_pressure(:,:,2:atm%num_layers,:) - pressure(:,:,:atm%num_layers-1,:))/ &
+    (pressure(:,:,2:,:) - pressure(:,:,:atm%num_layers-1,:))
   allocate(atm%level_temperature(block_size, atm%num_levels, num_blocks, atm%num_times))
   call xyzt_to_bznt(atm%level_temperature, level_temperature)
   deallocate(pressure)
@@ -652,21 +416,16 @@ subroutine create_atmosphere(atm, parser)
   !Get water abundance.
   start(1) = x_start; start(2) = y_start; start(3) = z_start; start(4) = t_start;
   counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_layers; counts(4) = atm%num_times;
-  call variable_data(ncid, "q", abundance, start, counts)
+  call read_variable(ncid, "q", buffer4d, start, counts)
   allocate(xh2o(block_size, atm%num_layers, num_blocks, atm%num_times))
-  call xyzt_to_bznt(xh2o, abundance)
-  deallocate(abundance)
+  call xyzt_to_bznt(xh2o, buffer4d)
 
   !Convert from (mass water)/(mass total air) to (mole water)/(mole dry air).
   xh2o(:,:,:,:) = (dry_air_mass/water_mass)*xh2o(:,:,:,:)/(1._wp - xh2o(:,:,:,:))
 
   !Read water vapor and ozone from the level file.
-  molecules(1)%id = h2o
-  molecules(1)%flag = "-H2O"
-  molecules(2)%id = o3
-  molecules(2)%flag = "-O3"
-  molecules(2)%name = "o3"
-  molecules(2)%mass = 47.997_wp
+  molecules(1)%id = h2o; molecules(1)%flag = "-H2O"
+  molecules(2)%id = o3; molecules(2)%flag = "-O3"; molecules(2)%name = "o3"; molecules(2)%mass = ozone_mass
   do i = 1, 2
     call get_argument(parser, trim(molecules(i)%flag), buffer)
     if (trim(buffer) .ne. "not present") then
@@ -677,43 +436,26 @@ subroutine create_atmosphere(atm, parser)
       else
         start(1) = x_start; start(2) = y_start; start(3) = z_start; start(4) = t_start;
         counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_layers; counts(4) = atm%num_times;
-        call variable_data(ncid, trim(molecules(i)%name), abundance, start, counts)
-        abundance(:,:,:,:) = (dry_air_mass/molecules(i)%mass)*abundance(:,:,:,:)
-        call xyzt_to_bznt(atm%ppmv(:,:,:,:,atm%num_molecules), abundance)
-        deallocate(abundance)
+        call read_variable(ncid, trim(molecules(i)%name), buffer4d, start, counts)
+        buffer4d(:,:,:,:) = (dry_air_mass/molecules(i)%mass)*buffer4d(:,:,:,:)
+        call xyzt_to_bznt(atm%ppmv(:,:,:,:,atm%num_molecules), buffer4d)
       endif
     endif
   enddo
 
   !Close the level file and open the greenhouse gas file.
-  err = nf90_close(ncid)
-  call netcdf_catch(err)
+  call close_dataset(ncid)
   call get_argument(parser, "ghg_file", buffer)
-  err = nf90_open(buffer, NF90_NOWRITE, ncid)
-  call netcdf_catch(err)
+  ncid = open_dataset(buffer)
 
   !Get the molecular abundance from their input year.
-  molecules(3)%id = co2
-  molecules(3)%flag = "-CO2"
-  molecules(3)%name = "co2"
-  molecules(4)%id = n2o
-  molecules(4)%flag = "-N2O"
-  molecules(4)%name = "n2o"
-  molecules(5)%id = ch4
-  molecules(5)%flag = "-CH4"
-  molecules(5)%name = "ch4"
-  molecules(6)%id = cfc11
-  molecules(6)%flag = "-CFC-11"
-  molecules(6)%name = "f11"
-  molecules(7)%id = cfc12
-  molecules(7)%flag = "-CFC-12"
-  molecules(7)%name = "f12"
-  molecules(8)%id = cfc113
-  molecules(8)%flag = "-CFC-113"
-  molecules(8)%name = "f113"
-  molecules(9)%id = hcfc22
-  molecules(9)%flag = "-HCFC-22"
-  molecules(9)%name = "f22"
+  molecules(3)%id = co2; molecules(3)%flag = "-CO2"; molecules(3)%name = "co2"
+  molecules(4)%id = n2o; molecules(4)%flag = "-N2O"; molecules(4)%name = "n2o"
+  molecules(5)%id = ch4; molecules(5)%flag = "-CH4"; molecules(5)%name = "ch4"
+  molecules(6)%id = cfc11; molecules(6)%flag = "-CFC-11"; molecules(6)%name = "f11"
+  molecules(7)%id = cfc12; molecules(7)%flag = "-CFC-12"; molecules(7)%name = "f12"
+  molecules(8)%id = cfc113; molecules(8)%flag = "-CFC-113"; molecules(8)%name = "f113"
+  molecules(9)%id = hcfc22; molecules(9)%flag = "-HCFC-22"; molecules(9)%name = "f22"
   do i = 3, 9
     call get_argument(parser, trim(molecules(i)%flag), buffer)
     if (trim(buffer) .ne. "not present") then
@@ -721,18 +463,14 @@ subroutine create_atmosphere(atm, parser)
       atm%molecules(atm%num_molecules) = molecules(i)%id
       read(buffer, *) year
       start(1) = int(year); counts(1) = 1
-      call variable_data(ncid, trim(molecules(i)%name), xmol, start(1:1), counts(1:1))
-      atm%ppmv(:,:,:,:,atm%num_molecules) = xmol(1)*from_ppmv
-      deallocate(xmol)
+      call read_variable(ncid, trim(molecules(i)%name), buffer1d, start(1), counts(1))
+      atm%ppmv(:,:,:,:,atm%num_molecules) = buffer1d(1)*from_ppmv
     endif
   enddo
-  err = nf90_close(ncid)
-  call netcdf_catch(err)
+  call close_dataset(ncid)
 
   !Get the molecular abundance from the command line.
-  molecules(10)%id = o2
-  molecules(10)%flag = "-O2"
-  molecules(10)%name = "o2"
+  molecules(10)%id = o2; molecules(10)%flag = "-O2"; molecules(10)%name = "o2"
   call get_argument(parser, trim(molecules(6)%flag), buffer)
   if (trim(buffer) .ne. "not present") then
     atm%num_molecules = atm%num_molecules + 1
@@ -743,16 +481,13 @@ subroutine create_atmosphere(atm, parser)
 
   !Read in the surface albedo from its own file.
   call get_argument(parser, "albedo_file", buffer)
-  err = nf90_open(buffer, nf90_nowrite, ncid)
-  call netcdf_catch(err)
+  ncid = open_dataset(buffer)
   start(1) = x_start; start(2) = y_start; start(3) = t_start;
   counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_times;
-  call variable_data(ncid, "fal", albedo, start(1:3), counts(1:3))
+  call read_variable(ncid, "fal", buffer3d, start(1:3), counts(1:3))
   allocate(atm%surface_albedo(block_size, num_blocks, atm%num_times))
-  call xyt_to_bnt(atm%surface_albedo, albedo)
-  deallocate(albedo)
-  err = nf90_close(ncid)
-  call netcdf_catch(err)
+  call xyt_to_bnt(atm%surface_albedo, buffer3d)
+  call close_dataset(ncid)
 
   !Determine if the run is all-sky or clear-sky.
   call get_argument(parser, "-clouds", buffer)
@@ -775,29 +510,27 @@ subroutine create_atmosphere(atm, parser)
                                    (air_density(:,:,:,:)*9.81)
 
     !Read in and calculate cloud inputs.
-    err = nf90_open(buffer, nf90_nowrite, ncid)
-    call netcdf_catch(err)
+    ncid = open_dataset(buffer)
     start(1) = x_start; start(2) = y_start; start(3) = z_start; start(4) = t_start;
     counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_layers; counts(4) = atm%num_times;
-    call variable_data(ncid, "cc", cloud_fraction, start, counts)
+    call read_variable(ncid, "cc", buffer4d, start, counts)
     allocate(atm%cloud_fraction(block_size, atm%num_layers, num_blocks, atm%num_times))
-    call xyzt_to_bznt(atm%cloud_fraction, cloud_fraction)
-    deallocate(cloud_fraction)
-    call variable_data(ncid, "ciwc", abundance, start, counts)
+    call xyzt_to_bznt(atm%cloud_fraction, buffer4d)
+    call read_variable(ncid, "ciwc", buffer4d, start, counts)
     allocate(atm%cloud_ice_content(block_size, atm%num_layers, num_blocks, atm%num_times))
-    call xyzt_to_bznt(atm%cloud_ice_content, abundance)
-    deallocate(abundance)
+    call xyzt_to_bznt(atm%cloud_ice_content, buffer4d)
     atm%cloud_ice_content(:,:,:,:) = air_density(:,:,:,:)*atm%cloud_ice_content(:,:,:,:)*kg_to_g
-    call variable_data(ncid, "clwc", abundance, start, counts)
+    call read_variable(ncid, "clwc", buffer4d, start, counts)
     allocate(atm%cloud_liquid_content(block_size, atm%num_layers, num_blocks, atm%num_times))
-    call xyzt_to_bznt(atm%cloud_liquid_content, abundance)
-    deallocate(abundance)
+    call xyzt_to_bznt(atm%cloud_liquid_content, buffer4d)
     atm%cloud_liquid_content(:,:,:,:) = air_density(:,:,:,:)*atm%cloud_liquid_content(:,:,:,:)*kg_to_g
     deallocate(air_density)
-    err = nf90_close(ncid)
-    call netcdf_catch(err)
+    call close_dataset(ncid)
   endif
   deallocate(xh2o)
+  if (allocated(buffer1d)) deallocate(buffer1d)
+  if (allocated(buffer3d)) deallocate(buffer3d)
+  if (allocated(buffer4d)) deallocate(buffer4d)
 end subroutine create_atmosphere
 
 
@@ -832,39 +565,6 @@ subroutine destroy_atmosphere(atm)
 end subroutine destroy_atmosphere
 
 
-!> @brief Add a variable to the output file.
-subroutine add_variable(output, dimid, indx, name, standard_name, units, fill_value, positive)
-
-  type(Output_t), intent(inout) :: output !< Output object.
-  integer, dimension(:), intent(in) :: dimid !< Dimension ids.
-  integer, intent(in) :: indx !< Variable index.
-  character(len=*), intent(in) :: name !< Variable name.
-  character(len=*), intent(in) :: standard_name !< Variable standard name.
-  character(len=*), intent(in), optional :: units !< Variable units.
-  real(kind=wp), intent(in), optional :: fill_value !< Fill value.
-  character(len=*), intent(in), optional :: positive !< Vertical sense.
-
-  integer :: error
-  integer :: varid
-
-  error = nf90_def_var(output%ncid, trim(name), nf90_double, dimid, varid)
-  call netcdf_catch(error)
-  error = nf90_put_att(output%ncid, varid, "standard_name", trim(standard_name))
-  call netcdf_catch(error)
-  if (present(units)) then
-    error = nf90_put_att(output%ncid, varid, "units", trim(units))
-    call netcdf_catch(error)
-  endif
-  if (present(fill_value)) then
-    error = nf90_put_att(output%ncid, varid, "_FillValue", fill_value)
-    call netcdf_catch(error)
-  endif
-  if (present(positive)) then
-    error = nf90_put_att(output%ncid, varid, "positive", trim(positive))
-    call netcdf_catch(error)
-  endif
-  output%varid(indx) = varid
-end subroutine add_variable
 
 
 !> @brief Create an output file and write metadata.
@@ -874,7 +574,6 @@ subroutine create_flux_file(output, filepath, atm)
   character(len=*), intent(in) :: filepath !< Path to file.
   type(Atmosphere_t), intent(in) :: atm !< Atmosphere.
 
-  integer :: error
   integer, parameter :: lat = 2
   integer, parameter :: level = 3
   integer, parameter :: lon = 1
@@ -883,51 +582,37 @@ subroutine create_flux_file(output, filepath, atm)
   integer, parameter :: p = 9
   integer, parameter :: time = 4
 
-  error = nf90_create(trim(filepath), nf90_netcdf4, output%ncid)
-  call netcdf_catch(error)
-
+  output%ncid = create_dataset(trim(filepath))
   allocate(output%dimid(num_dims))
-  error = nf90_def_dim(output%ncid, "lon", nlon, output%dimid(lon))
-  call netcdf_catch(error)
-  error = nf90_def_dim(output%ncid, "lat", nlat, output%dimid(lat))
-  call netcdf_catch(error)
-  error = nf90_def_dim(output%ncid, "level", atm%num_levels, output%dimid(level))
-  call netcdf_catch(error)
-  error = nf90_def_dim(output%ncid, "time", nf90_unlimited, output%dimid(time))
-  call netcdf_catch(error)
-
+  output%dimid(lon) = add_dimension(output%ncid, "lon", nlon)
+  output%dimid(lat) = add_dimension(output%ncid, "lat", nlat)
+  output%dimid(level) = add_dimension(output%ncid, "level", atm%num_levels)
+  output%dimid(time) = add_dimension(output%ncid, "time")
   allocate(output%varid(num_vars))
-  call add_variable(output, output%dimid(lon:lon), lon, "lon", "longitude", "degrees_east")
-  error = nf90_put_att(output%ncid, output%varid(lon), "axis", "X")
-  call netcdf_catch(error)
-  call add_variable(output, output%dimid(lat:lat), lat, "lat", "latitude", "degrees_north")
-  error = nf90_put_att(output%ncid, output%varid(lat), "axis", "Y")
-  call netcdf_catch(error)
-  call add_variable(output, output%dimid(level:level), level, "level", "sigma_level", positive="down")
-  error = nf90_put_att(output%ncid, output%varid(level), "axis", "Z")
-  call netcdf_catch(error)
-  call add_variable(output, output%dimid(time:time), time, "time", "time", &
-                    "hours since 1900-01-01 00:00:00.0")
-  error = nf90_put_att(output%ncid, output%varid(time), "axis", "T")
-  call netcdf_catch(error)
-  error = nf90_put_att(output%ncid, output%varid(time), "calendar", "gregorian")
-  call netcdf_catch(error)
-  call add_variable(output, output%dimid, rld, "rld", "downwelling_longwave_flux_in_air", "W m-2")
-  call add_variable(output, output%dimid, rlu, "rlu", "upwelling_longwave_flux_in_air", "W m-2")
-  call add_variable(output, output%dimid, rsd, "rsd", "downwelling_shortwave_flux_in_air", "W m-2")
-  call add_variable(output, output%dimid, rsu, "rsu", "upwelling_shortwave_flux_in_air", "W m-2")
-  call add_variable(output, output%dimid, p, "p", "air_pressure", "mb")
-
-  error = nf90_put_var(output%ncid, lon, atm%longitude)
-  call netcdf_catch(error)
-  error = nf90_put_var(output%ncid, lat, atm%latitude)
-  call netcdf_catch(error)
-  error = nf90_put_var(output%ncid, level, atm%level)
-  call netcdf_catch(error)
-  error = nf90_put_var(output%ncid, time, atm%time)
-  call netcdf_catch(error)
-  error = nf90_put_var(output%ncid, p, atm%reference_pressure)
-  call netcdf_catch(error)
+  output%varid(lon) = add_variable(output%ncid, output%dimid(lon:lon), &
+                                   "lon", "longitude", "degrees_east", axis="X")
+  output%varid(lat) = add_variable(output%ncid, output%dimid(lat:lat), &
+                                   "lat", "latitude", "degrees_north", axis="Y")
+  output%varid(level) = add_variable(output%ncid, output%dimid(level:level), &
+                                     "level", "sigma_level", positive="down", &
+                                     axis="Z")
+  output%varid(time) = add_variable(output%ncid, output%dimid(time:time), &
+                                    "time", "time", "hours since 1900-01-01 00:00:00.0", &
+                                    axis="T", calendar="gregorian")
+  output%varid(rld) = add_variable(output%ncid, output%dimid, "rld", &
+                                   "downwelling_longwave_flux_in_air", "W m-2")
+  output%varid(rlu) = add_variable(output%ncid, output%dimid, "rlu", &
+                                   "upwelling_longwave_flux_in_air", "W m-2")
+  output%varid(rsd) = add_variable(output%ncid, output%dimid, "rsd", &
+                                   "downwelling_shortwave_flux_in_air", "W m-2")
+  output%varid(rsu) = add_variable(output%ncid, output%dimid, "rsu", &
+                                   "upwelling_shortwave_flux_in_air", "W m-2")
+  output%varid(p) = add_variable(output%ncid, output%dimid, "p", "air_pressure", "mb")
+  call write_variable(output%ncid, lon, atm%longitude)
+  call write_variable(output%ncid, lat, atm%latitude)
+  call write_variable(output%ncid, level, atm%level)
+  call write_variable(output%ncid, time, atm%time)
+  call write_variable(output%ncid, p, atm%reference_pressure)
 end subroutine create_flux_file
 
 
@@ -936,10 +621,7 @@ subroutine close_flux_file(output)
 
   type(Output_t), intent(inout) :: output !< Output object.
 
-  integer :: error
-
-  error = nf90_close(output%ncid)
-  call netcdf_catch(error)
+  call close_dataset(output%ncid)
   if (allocated(output%dimid)) deallocate(output%dimid)
   if (allocated(output%varid)) deallocate(output%varid)
 end subroutine close_flux_file
@@ -956,7 +638,6 @@ subroutine write_output(output, id, data, time, block_spot, block_id)
   integer, intent(in) :: block_id !< Index in num_blocks dimension.
 
   integer, dimension(4) :: counts
-  integer :: error
   integer :: i
   integer, dimension(4) :: start
 
@@ -968,14 +649,9 @@ subroutine write_output(output, id, data, time, block_spot, block_id)
     start(2) = i/nlon + 1
     start(1) = i - (i/nlon)*nlon
   endif
-  start(3) = 1
-  start(4) = time
-  counts(1) = 1
-  counts(2) = 1
-  counts(3) = nlevel
-  counts(4) = 1
-  error = nf90_put_var(output%ncid, id, data, start, counts)
-  call netcdf_catch(error)
+  start(3) = 1; start(4) = time
+  counts(1) = 1; counts(2) = 1; counts(3) = nlevel; counts(4) = 1
+  call write_variable(output%ncid, id, data, start, counts)
 end subroutine write_output
 
 

@@ -5,7 +5,7 @@ day="01"
 input="era5-inputs"
 output="output_data"
 
-mkdir -p ${output}/${year}-${month}-era5
+mkdir -p ${output}/${year}-${month}
 
 #All-sky.
 time ./era5 ${input}/rrtmgp-data-lw-g256-2018-12-04.nc \

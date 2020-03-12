@@ -1,7 +1,7 @@
 !> @brief Calculate broadband fluxes for ERA5 data.
 program main
+use, intrinsic :: iso_fortran_env, only: error_unit
 
-use, intrinsic :: iso_fortran_env
 use argparse
 use era5
 
@@ -14,6 +14,7 @@ use stochastic_clouds, only: overlap_parameter, TotalWaterPDF
 use mo_fluxes, only: ty_fluxes_broadband
 use mo_gas_concentrations, only: ty_gas_concs
 use mo_gas_optics_rrtmgp, only: ty_gas_optics_rrtmgp
+use mo_rte_kind, only: wp
 use mo_load_coefficients, only: load_and_init
 use mo_optical_props, only: ty_optical_props_1scl, ty_optical_props_2str
 use mo_rte_lw, only: rte_lw
@@ -29,6 +30,7 @@ integer :: i
 integer :: j
 integer :: k
 integer :: m
+integer :: n
 type(Output_t) :: output
 type(Parser_t) :: parser
 integer :: t
@@ -38,10 +40,10 @@ character(len=8), dimension(:), allocatable :: gas_names
 character(len=8), dimension(num_molecules) :: gases
 type(ty_gas_optics_rrtmgp) :: lw_k
 type(ty_optical_props_1scl) :: lw_optics
-real(kind=real64) :: max_pressure
-real(kind=real64) :: max_temperature
-real(kind=real64) :: min_pressure
-real(kind=real64) :: min_temperature
+real(kind=wp) :: max_pressure
+real(kind=wp) :: max_temperature
+real(kind=wp) :: min_pressure
+real(kind=wp) :: min_temperature
 integer :: num_lw_bands
 integer :: num_lw_gpoints
 integer :: num_sw_bands
@@ -50,29 +52,29 @@ type(ty_gas_concs) :: ppmv
 type(ty_source_func_lw) :: source
 type(ty_gas_optics_rrtmgp) :: sw_k
 type(ty_optical_props_2str) :: sw_optics
-real(kind=real64), dimension(:,:), allocatable :: toa
+real(kind=wp), dimension(:,:), allocatable :: toa
 
 !Cloud optics.
-real(kind=real64), dimension(:), allocatable :: altitude
+real(kind=wp), dimension(:), allocatable :: altitude
 integer :: band
 type(IncompleteBeta) :: beta
 integer :: beta_shape
 type(OpticalProperties), dimension(:), allocatable :: cloud_ice_optics
 type(OpticalProperties), dimension(:), allocatable :: cloud_liquid_optics
-real(kind=real64), dimension(:), allocatable :: ice_content
+real(kind=wp), dimension(:), allocatable :: ice_content
 type(IceCloudOptics) :: ice_parameterization
-real(kind=real64) :: ice_radius
-real(kind=real64), dimension(:), allocatable :: liquid_content
+real(kind=wp) :: ice_radius
+real(kind=wp), dimension(:), allocatable :: liquid_content
 type(HuStamnes) :: liquid_parameterization
-real(kind=real64) :: liquid_radius
-real(kind=real64), dimension(:), allocatable :: lw_rrtmgp_bands
+real(kind=wp) :: liquid_radius
+real(kind=wp), dimension(:), allocatable :: lw_rrtmgp_bands
 type(OpticalProperties), dimension(:), allocatable :: lw_cloud_ice_optics_rrtmgp
 type(OpticalProperties), dimension(:), allocatable :: lw_cloud_liquid_optics_rrtmgp
 integer :: num_subcolumns
-real(kind=real64), dimension(:), allocatable :: overlap
-real(kind=real64), parameter :: pressure_scale_height = 7.3 ![km], taken from GFDL AM4.
-real(kind=real64) :: scale_length
-real(kind=real64), dimension(:), allocatable :: sw_rrtmgp_bands
+real(kind=wp), dimension(:), allocatable :: overlap
+real(kind=wp), parameter :: pressure_scale_height = 7.3 ![km], taken from GFDL AM4.
+real(kind=wp) :: scale_length
+real(kind=wp), dimension(:), allocatable :: sw_rrtmgp_bands
 type(OpticalProperties), dimension(:), allocatable :: sw_cloud_ice_optics_rrtmgp
 type(OpticalProperties), dimension(:), allocatable :: sw_cloud_liquid_optics_rrtmgp
 type(TotalWaterPDF) :: water_pdf
@@ -82,25 +84,25 @@ type(ty_optical_props_2str) :: sw_allsky_optics
 type(ty_source_func_lw) :: lw_allsky_source
 type(ty_fluxes_broadband) :: lw_allsky_fluxes
 type(ty_fluxes_broadband) :: sw_allsky_fluxes
-real(kind=real64), dimension(:), allocatable :: tau_liquid
-real(kind=real64), dimension(:), allocatable :: omega_liquid
-real(kind=real64), dimension(:), allocatable :: g_liquid
-real(kind=real64), dimension(:), allocatable :: tau_ice
-real(kind=real64), dimension(:), allocatable :: omega_ice
-real(kind=real64), dimension(:), allocatable :: g_ice
+real(kind=wp), dimension(:), allocatable :: tau_liquid
+real(kind=wp), dimension(:), allocatable :: omega_liquid
+real(kind=wp), dimension(:), allocatable :: g_liquid
+real(kind=wp), dimension(:), allocatable :: tau_ice
+real(kind=wp), dimension(:), allocatable :: omega_ice
+real(kind=wp), dimension(:), allocatable :: g_ice
 
 !Fluxes.
-real(kind=real64), dimension(:,:), allocatable :: diffuse_albedo
-real(kind=real64), dimension(:,:), allocatable :: direct_albedo
-real(kind=real64), dimension(:,:), allocatable :: emissivity
-real(kind=real64), parameter :: infrared_cutoff = 1.e4/0.7 ![cm-1].
+real(kind=wp), dimension(:,:), allocatable :: diffuse_albedo
+real(kind=wp), dimension(:,:), allocatable :: direct_albedo
+real(kind=wp), dimension(:,:), allocatable :: emissivity
+real(kind=wp), parameter :: infrared_cutoff = 1.e4/0.7 ![cm-1].
 integer :: infrared_cutoff_index
-real(kind=real64) :: input_emissivity
+real(kind=wp) :: input_emissivity
 type(ty_fluxes_broadband) :: lw_fluxes
-real(kind=real64), parameter :: min_cos_zenith = tiny(min_cos_zenith)
+real(kind=wp), parameter :: min_cos_zenith = tiny(min_cos_zenith)
 type(ty_fluxes_broadband) :: sw_fluxes
-real(kind=real64), dimension(:), allocatable :: total_irradiance
-real(kind=real64), dimension(:), allocatable :: zenith
+real(kind=wp), dimension(:), allocatable :: total_irradiance
+real(kind=wp), dimension(:), allocatable :: zenith
 
 !Add arguments.
 parser = create_parser()
@@ -178,7 +180,7 @@ call catch(error)
 allocate(emissivity(num_lw_bands, block_size))
 call get_argument(parser, "-e", buffer)
 if (trim(buffer) .eq. "not present") then
-  emissivity(:,:) = 1._real64
+  emissivity(:,:) = 1._wp
 else
   read(buffer, *) input_emissivity
   emissivity(:,:) = input_emissivity
@@ -215,7 +217,7 @@ if (.not. atm%clear) then
   endif
   call get_argument(parser, "-s", buffer)
   if (trim(buffer) .eq. "not present") then
-    scale_length = 2._real64
+    scale_length = 2._wp
   else
     read(buffer, *) scale_length
   endif
@@ -240,7 +242,7 @@ if (.not. atm%clear) then
   call liquid_parameterization%construct(buffer)
   call get_argument(parser, "-r-liquid", buffer)
   if (trim(buffer) .eq. "not present") then
-    liquid_radius = 10._real64
+    liquid_radius = 10._wp
   else
     read(buffer, *) liquid_radius
   endif
@@ -253,7 +255,7 @@ if (.not. atm%clear) then
   call ice_parameterization%construct(buffer)
   call get_argument(parser, "-r-ice", buffer)
   if (trim(buffer) .eq. "not present") then
-    ice_radius = 50._real64
+    ice_radius = 50._wp
   else
     read(buffer, *) ice_radius
   endif
@@ -356,7 +358,7 @@ do t = 1, atm%num_times
       if (atm%solar_zenith_angle(j,i,t) .gt. min_cos_zenith) then
         zenith(j) = atm%solar_zenith_angle(j,i,t)
       else
-        zenith(j) = 1._real64
+        zenith(j) = 1._wp
       endif
     enddo
     total_irradiance(:) = sum(toa, dim=2)
@@ -411,7 +413,7 @@ do t = 1, atm%num_times
                                            atm%cloud_ice_content(j,:,i,t), &
                                            overlap(:), liquid_content(:), ice_content(:))
           do m = 1, atm%num_layers
-            if (liquid_content(m) .gt. 0._real64) then
+            if (liquid_content(m) .gt. 0._wp) then
               !Calculate liquid cloud optics where there are liquid clouds.
               call liquid_parameterization%optics(liquid_content(m), liquid_radius, &
                                                   cloud_liquid_optics(m))
@@ -428,7 +430,7 @@ do t = 1, atm%num_times
               sw_cloud_liquid_optics_rrtmgp(m)%single_scatter_albedo(:) = 0.
               sw_cloud_liquid_optics_rrtmgp(m)%asymmetry_factor(:) = 0.
             endif
-            if (ice_content(m) .gt. 0._real64) then
+            if (ice_content(m) .gt. 0._wp) then
               !Calculate ice cloud optics where there are ice clouds.
               call ice_parameterization%optics(ice_content(m), ice_radius, &
                                                cloud_ice_optics(m))
@@ -450,22 +452,26 @@ do t = 1, atm%num_times
           !Add clear-sky and cloud optics.
           do m = 1, num_lw_gpoints
             band = lw_optics%convert_gpt2band(m)
-            tau_liquid(:) = lw_cloud_liquid_optics_rrtmgp(:)%extinction_coefficient(band)* &
-                            atm%layer_thickness(j,:,i,t)
-            tau_ice(:) = lw_cloud_ice_optics_rrtmgp(:)%extinction_coefficient(band)* &
-                         atm%layer_thickness(j,:,i,t)
-            lw_allsky_optics%tau(1,:,m) = lw_optics%tau(j,:,m) + tau_liquid(:) + tau_ice(:)
+            do n = 1, atm%num_layers
+              tau_liquid(n) = lw_cloud_liquid_optics_rrtmgp(n)%extinction_coefficient(band)* &
+                              atm%layer_thickness(j,n,i,t)
+              tau_ice(n) = lw_cloud_ice_optics_rrtmgp(n)%extinction_coefficient(band)* &
+                           atm%layer_thickness(j,n,i,t)
+              lw_allsky_optics%tau(1,n,m) = lw_optics%tau(j,n,m) + tau_liquid(n) + tau_ice(n)
+            enddo
           enddo
           do m = 1, num_sw_gpoints
             band = sw_optics%convert_gpt2band(m)
-            tau_liquid(:) = sw_cloud_liquid_optics_rrtmgp(:)%extinction_coefficient(band)* &
-                            atm%layer_thickness(j,:,i,t)
-            omega_liquid(:) = sw_cloud_liquid_optics_rrtmgp(:)%single_scatter_albedo(band)
-            g_liquid(:) = sw_cloud_liquid_optics_rrtmgp(:)%asymmetry_factor(band)
-            tau_ice(:) = sw_cloud_ice_optics_rrtmgp(:)%extinction_coefficient(band)* &
-                         atm%layer_thickness(j,:,i,t)
-            omega_ice(:) = sw_cloud_ice_optics_rrtmgp(:)%single_scatter_albedo(band)
-            g_ice(:) = sw_cloud_ice_optics_rrtmgp(:)%asymmetry_factor(band)
+            do n = 1, atm%num_layers
+              tau_liquid(n) = sw_cloud_liquid_optics_rrtmgp(n)%extinction_coefficient(band)* &
+                              atm%layer_thickness(j,n,i,t)
+              omega_liquid(n) = sw_cloud_liquid_optics_rrtmgp(n)%single_scatter_albedo(band)
+              g_liquid(n) = sw_cloud_liquid_optics_rrtmgp(n)%asymmetry_factor(band)
+              tau_ice(n) = sw_cloud_ice_optics_rrtmgp(n)%extinction_coefficient(band)* &
+                           atm%layer_thickness(j,n,i,t)
+              omega_ice(n) = sw_cloud_ice_optics_rrtmgp(n)%single_scatter_albedo(band)
+              g_ice(n) = sw_cloud_ice_optics_rrtmgp(n)%asymmetry_factor(band)
+            enddo
             sw_allsky_optics%tau(1,:,m) = sw_optics%tau(j,:,m) + tau_liquid(:) + tau_ice(:)
             sw_allsky_optics%ssa(1,:,m) = sw_optics%tau(j,:,m)*sw_optics%ssa(j,:,m) + &
               tau_liquid(:)*omega_liquid(:) + tau_ice(:)*omega_ice(:)
@@ -514,8 +520,8 @@ do t = 1, atm%num_times
       call write_output(output, rld, lw_fluxes%flux_dn, t, j, i)
       call write_output(output, rlu, lw_fluxes%flux_up, t, j, i)
       if (atm%solar_zenith_angle(j,i,t) .lt. min_cos_zenith) then
-        sw_fluxes%flux_dn(j,:) = 0._real64
-        sw_fluxes%flux_up(j,:) = 0._real64
+        sw_fluxes%flux_dn(j,:) = 0._wp
+        sw_fluxes%flux_up(j,:) = 0._wp
       endif
       call write_output(output, rsd, sw_fluxes%flux_dn, t, j, i)
       call write_output(output, rsu, sw_fluxes%flux_up, t, j, i)

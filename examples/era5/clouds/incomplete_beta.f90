@@ -1,5 +1,7 @@
 !> @brief Incomplete beta distribution utilties.
 module incomplete_beta
+use mo_rte_kind, only: wp
+
 use netcdf_utils, only: close_dataset, open_dataset, read_variable
 implicit none
 private
@@ -9,9 +11,9 @@ private
 type, public :: IncompleteBeta
   integer, dimension(:), allocatable :: p !< Incomplete beta distribution shape parameters.
   integer, dimension(:), allocatable :: q !< Incomplete beta distribution shape parameters.
-  real, dimension(:), allocatable :: x !< Table input values.
-  real, dimension(:,:,:), allocatable :: y !< Table of calculated values.
-  real, dimension(:,:,:), allocatable :: y_inverse !< Table of inverse values.
+  real(kind=wp), dimension(:), allocatable :: x !< Table input values.
+  real(kind=wp), dimension(:,:,:), allocatable :: y !< Table of calculated values.
+  real(kind=wp), dimension(:,:,:), allocatable :: y_inverse !< Table of inverse values.
   contains
   procedure, public :: construct
   procedure, public :: destruct
@@ -58,14 +60,14 @@ end subroutine destruct
 pure function interp(x, y, newx) &
   result(newy)
 
-  real, dimension(:), intent(in) :: x !< Domain values for the array to be interpolated in.
-  real, dimension(:), intent(in) :: y !< Array values to be interpolated in.
-  real, intent(in) :: newx !< Domain value to interpolate to.
-  real :: newy !< Interpolated value.
+  real(kind=wp), dimension(:), intent(in) :: x !< Domain values for the array to be interpolated in.
+  real(kind=wp), dimension(:), intent(in) :: y !< Array values to be interpolated in.
+  real(kind=wp), intent(in) :: newx !< Domain value to interpolate to.
+  real(kind=wp) :: newy !< Interpolated value.
 
-  real :: b
+  real(kind=wp) :: b
   integer :: i
-  real :: m
+  real(kind=wp) :: m
 
   do i = 2, size(x) - 1
     if (x(i) .gt. newx) then
@@ -85,8 +87,8 @@ elemental pure function inverse(self, p, q, x) &
   class(IncompleteBeta), intent(in) :: self
   integer, intent(in) :: p !< Incomplete beta distribution shape parameter.
   integer, intent(in) :: q !< Incomplete beta distribution shape parameter.
-  real, intent(in) :: x !< Value to evaluate function at.
-  real :: y !< Result.
+  real(kind=wp), intent(in) :: x !< Value to evaluate function at.
+  real(kind=wp) :: y !< Result.
 
   y = interp(self%x, self%y_inverse(:,p,q), x)
 end function inverse
@@ -99,8 +101,8 @@ elemental pure function value(self, p, q, x) &
   class(IncompleteBeta), intent(in) :: self
   integer, intent(in) :: p !< Incomplete beta distribution shape parameter.
   integer, intent(in) :: q !< Incomplete beta distribution shape parameter.
-  real, intent(in) :: x !< Value to evaluate function at.
-  real :: y !< Result.
+  real(kind=wp), intent(in) :: x !< Value to evaluate function at.
+  real(kind=wp) :: y !< Result.
 
   y = interp(self%x, self%y(:,p,q), x)
 end function value

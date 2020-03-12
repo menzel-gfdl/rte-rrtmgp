@@ -2,6 +2,8 @@
 module netcdf_utils
 use, intrinsic :: iso_fortran_env, only: error_unit
 use netcdf
+
+use mo_rte_kind, only: wp
 implicit none
 private
 
@@ -112,7 +114,7 @@ subroutine read_attribute_1d_r(ncid, variable, name, buffer)
   integer, intent(in) :: ncid !< NetCDF id.
   character(len=*), intent(in) :: variable !< Variable name.
   character(len=*), intent(in) :: name !< Attribute name.
-  real, dimension(:), intent(out) :: buffer
+  real(kind=wp), dimension(:), intent(out) :: buffer
 
   integer :: err
   integer :: varid
@@ -129,7 +131,7 @@ subroutine read_global_attribute_r(ncid, name, buffer)
 
   integer, intent(in) :: ncid !< NetCDF id.
   character(len=*), intent(in) :: name !< Attribute name.
-  real, intent(out) :: buffer
+  real(kind=wp), intent(out) :: buffer
 
   integer :: err
 
@@ -167,7 +169,7 @@ subroutine read_variable_1d_r(ncid, name, buffer)
 
   integer, intent(in) :: ncid !< NetCDF id.
   character(len=*), intent(in) :: name !< Variable name.
-  real, dimension(:), allocatable, intent(inout) :: buffer
+  real(kind=wp), dimension(:), allocatable, intent(inout) :: buffer
 
   integer, dimension(1) :: dimids
   integer :: err
@@ -191,7 +193,7 @@ subroutine read_variable_2d_r(ncid, name, buffer)
 
   integer, intent(in) :: ncid !< NetCDF id.
   character(len=*), intent(in) :: name !< Variable name.
-  real, dimension(:,:), allocatable, intent(inout) :: buffer
+  real(kind=wp), dimension(:,:), allocatable, intent(inout) :: buffer
 
   integer, dimension(2) :: dimids
   integer :: err
@@ -218,7 +220,7 @@ subroutine read_variable_3d_r(ncid, name, buffer)
 
   integer, intent(in) :: ncid !< NetCDF id.
   character(len=*), intent(in) :: name !< Variable name.
-  real, dimension(:,:,:), allocatable, intent(inout) :: buffer
+  real(kind=wp), dimension(:,:,:), allocatable, intent(inout) :: buffer
 
   integer, dimension(3) :: dimids
   integer :: err

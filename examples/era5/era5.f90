@@ -1,8 +1,11 @@
 !> @brief Reads in ERA5 formatted data.
 module era5
+use, intrinsic :: iso_fortran_env, only: error_unit
 
-use, intrinsic :: iso_fortran_env
 use netcdf
+
+use mo_rte_kind, only: wp
+
 use argparse
 implicit none
 private
@@ -10,34 +13,34 @@ private
 
 type, public :: Atmosphere_t
   logical :: clear !< Flag for clear-sky only runs.
-  real(kind=real64), dimension(:,:,:,:), allocatable :: cloud_fraction !< Saturation volume fraction (block_size, layer, num_blocks, time).
-  real(kind=real64), dimension(:,:,:,:), allocatable :: cloud_ice_content !< Cloud ice water content [g m-3]  (block_size, layer, num_blocks, time)
-  real(kind=real64), dimension(:,:,:,:), allocatable :: cloud_liquid_content !< Cloud liquid water content [g m-3] (block_size, layer, num_blocks, time)
-  real(kind=real64), dimension(:), allocatable :: latitude !< Latitude [degrees].
-  real(kind=real64), dimension(:,:,:,:), allocatable :: layer_pressure !< Pressure [Pa] (block_size, layer, num_blocks, time).
-  real(kind=real64), dimension(:,:,:,:), allocatable :: layer_temperature !< Temperature [K] (block_size, layer, num_blocks, time).
-  real(kind=real64), dimension(:,:,:,:), allocatable :: layer_thickness !< Thickness [m] (block_size, layer, num_blocks, time).
-  real(kind=real64), dimension(:), allocatable :: level !< Pressure [mb].
-  real(kind=real64), dimension(:,:,:,:), allocatable :: level_pressure !< Pressure [Pa] (blocks_size level, num_blocks, time).
-  real(kind=real64), dimension(:,:,:,:), allocatable :: level_temperature !< Temperature [K] (block_size, level, num_blocks, time).
-  real(kind=real64), dimension(:), allocatable :: longitude !< Longitude [degrees].
+  real(kind=wp), dimension(:,:,:,:), allocatable :: cloud_fraction !< Saturation volume fraction (block_size, layer, num_blocks, time).
+  real(kind=wp), dimension(:,:,:,:), allocatable :: cloud_ice_content !< Cloud ice water content [g m-3]  (block_size, layer, num_blocks, time)
+  real(kind=wp), dimension(:,:,:,:), allocatable :: cloud_liquid_content !< Cloud liquid water content [g m-3] (block_size, layer, num_blocks, time)
+  real(kind=wp), dimension(:), allocatable :: latitude !< Latitude [degrees].
+  real(kind=wp), dimension(:,:,:,:), allocatable :: layer_pressure !< Pressure [Pa] (block_size, layer, num_blocks, time).
+  real(kind=wp), dimension(:,:,:,:), allocatable :: layer_temperature !< Temperature [K] (block_size, layer, num_blocks, time).
+  real(kind=wp), dimension(:,:,:,:), allocatable :: layer_thickness !< Thickness [m] (block_size, layer, num_blocks, time).
+  real(kind=wp), dimension(:), allocatable :: level !< Pressure [mb].
+  real(kind=wp), dimension(:,:,:,:), allocatable :: level_pressure !< Pressure [Pa] (blocks_size level, num_blocks, time).
+  real(kind=wp), dimension(:,:,:,:), allocatable :: level_temperature !< Temperature [K] (block_size, level, num_blocks, time).
+  real(kind=wp), dimension(:), allocatable :: longitude !< Longitude [degrees].
   integer, dimension(:), allocatable :: molecules !< Molecule ids (molecule).
   integer :: num_columns !< Number of columns.
   integer :: num_layers !< Number of layers.
   integer :: num_levels !< Number of levels.
   integer :: num_molecules !< Number of molecules.
   integer :: num_times !< Number of times.
-  real(kind=real64), dimension(:,:,:,:,:), allocatable :: ppmv !< Molecular abundancee (block_size, level, num_blocks, time, molecule).
-  real(kind=real64), dimension(:,:,:,:), allocatable :: reference_pressure !< Actual model pressure [mb] (lon, lat, level, time).
-  real(kind=real64), dimension(:,:,:), allocatable :: solar_zenith_angle !< Solar zenith angle [degrees] (block_size, num_blocks, time).
-  real(kind=real64), dimension(:,:,:), allocatable :: surface_albedo !< Surface albedo (block_size, num_blocks, time).
-  real(kind=real64), dimension(:,:,:), allocatable :: surface_albedo_diffuse_ir !< Surface albedo for infrared diffuse beam (block_size, num_blocks, time).
-  real(kind=real64), dimension(:,:,:), allocatable :: surface_albedo_diffuse_uv !< Surface albedo for ultraviolet diffuse beam (block_size, num_blocks, time).
-  real(kind=real64), dimension(:,:,:), allocatable :: surface_albedo_direct_ir !< Surface albedo for infrared direct beam (block_size, num_blocks, time).
-  real(kind=real64), dimension(:,:,:), allocatable :: surface_albedo_direct_uv !< Surface albedo for ultraviolet direct beam (block_size, num_blocks, time).
-  real(kind=real64), dimension(:,:,:), allocatable :: surface_temperature !< Surface temperature [K] (block_size, num_blocks, time).
-  real(kind=real64), dimension(:), allocatable :: time !< Time [hours].
-  real(kind=real64), dimension(:), allocatable :: total_solar_irradiance !< Total solar irradiance [W m-2] (time).
+  real(kind=wp), dimension(:,:,:,:,:), allocatable :: ppmv !< Molecular abundancee (block_size, level, num_blocks, time, molecule).
+  real(kind=wp), dimension(:,:,:,:), allocatable :: reference_pressure !< Actual model pressure [mb] (lon, lat, level, time).
+  real(kind=wp), dimension(:,:,:), allocatable :: solar_zenith_angle !< Solar zenith angle [degrees] (block_size, num_blocks, time).
+  real(kind=wp), dimension(:,:,:), allocatable :: surface_albedo !< Surface albedo (block_size, num_blocks, time).
+  real(kind=wp), dimension(:,:,:), allocatable :: surface_albedo_diffuse_ir !< Surface albedo for infrared diffuse beam (block_size, num_blocks, time).
+  real(kind=wp), dimension(:,:,:), allocatable :: surface_albedo_diffuse_uv !< Surface albedo for ultraviolet diffuse beam (block_size, num_blocks, time).
+  real(kind=wp), dimension(:,:,:), allocatable :: surface_albedo_direct_ir !< Surface albedo for infrared direct beam (block_size, num_blocks, time).
+  real(kind=wp), dimension(:,:,:), allocatable :: surface_albedo_direct_uv !< Surface albedo for ultraviolet direct beam (block_size, num_blocks, time).
+  real(kind=wp), dimension(:,:,:), allocatable :: surface_temperature !< Surface temperature [K] (block_size, num_blocks, time).
+  real(kind=wp), dimension(:), allocatable :: time !< Time [hours].
+  real(kind=wp), dimension(:), allocatable :: total_solar_irradiance !< Total solar irradiance [W m-2] (time).
 end type Atmosphere_t
 
 
@@ -119,15 +122,15 @@ subroutine variable_data_double_1d(ncid, name, buffer, start, counts)
 
   integer, intent(in) :: ncid
   character(len=*), intent(in) :: name
-  real(kind=real64), dimension(:), allocatable, intent(inout) :: buffer
+  real(kind=wp), dimension(:), allocatable, intent(inout) :: buffer
   integer, dimension(1), intent(in), optional :: start
   integer, dimension(1), intent(in), optional :: counts
 
-  real(kind=real64) :: add
+  real(kind=wp) :: add
   integer, dimension(1) :: dimids
   integer :: err
   integer :: i
-  real(kind=real64) :: scales
+  real(kind=wp) :: scales
   integer, dimension(1) :: sizes
   integer :: varid
 
@@ -148,17 +151,17 @@ subroutine variable_data_double_1d(ncid, name, buffer, start, counts)
   call netcdf_catch(err)
   err = nf90_get_att(ncid, varid, "scale_factor", scales)
   if (err .eq. nf90_enotatt) then
-    scales = 1._real64
+    scales = 1._wp
   else
     call netcdf_catch(err)
   endif
   err = nf90_get_att(ncid, varid, "add_offset", add)
   if (err .eq. nf90_enotatt) then
-    add = 0._real64
+    add = 0._wp
   else
     call netcdf_catch(err)
   endif
-  if (scales .ne. 1._real64 .or. add .ne. 0._real64) then
+  if (scales .ne. 1._wp .or. add .ne. 0._wp) then
     buffer(:) = buffer(:)*scales + add
   endif
 end subroutine variable_data_double_1d
@@ -168,15 +171,15 @@ subroutine variable_data_double_3d(ncid, name, buffer, start, counts)
 
   integer, intent(in) :: ncid
   character(len=*), intent(in) :: name
-  real(kind=real64), dimension(:,:,:), allocatable, intent(inout) :: buffer
+  real(kind=wp), dimension(:,:,:), allocatable, intent(inout) :: buffer
   integer, dimension(3), intent(in), optional :: start
   integer, dimension(3), intent(in), optional :: counts
 
-  real(kind=real64) :: add
+  real(kind=wp) :: add
   integer, dimension(3) :: dimids
   integer :: err
   integer :: i
-  real(kind=real64) :: scales
+  real(kind=wp) :: scales
   integer, dimension(3) :: sizes
   integer :: varid
 
@@ -197,17 +200,17 @@ subroutine variable_data_double_3d(ncid, name, buffer, start, counts)
   call netcdf_catch(err)
   err = nf90_get_att(ncid, varid, "scale_factor", scales)
   if (err .eq. nf90_enotatt) then
-    scales = 1._real64
+    scales = 1._wp
   else
     call netcdf_catch(err)
   endif
   err = nf90_get_att(ncid, varid, "add_offset", add)
   if (err .eq. nf90_enotatt) then
-    add = 0._real64
+    add = 0._wp
   else
     call netcdf_catch(err)
   endif
-  if (scales .ne. 1._real64 .or. add .ne. 0._real64) then
+  if (scales .ne. 1._wp .or. add .ne. 0._wp) then
     buffer(:,:,:) = buffer(:,:,:)*scales + add
   endif
 end subroutine variable_data_double_3d
@@ -217,15 +220,15 @@ subroutine variable_data_double_4d(ncid, name, buffer, start, counts)
 
   integer, intent(in) :: ncid
   character(len=*), intent(in) :: name
-  real(kind=real64), dimension(:,:,:,:), allocatable, intent(inout) :: buffer
+  real(kind=wp), dimension(:,:,:,:), allocatable, intent(inout) :: buffer
   integer, dimension(4), intent(in), optional :: start
   integer, dimension(4), intent(in), optional :: counts
 
-  real(kind=real64) :: add
+  real(kind=wp) :: add
   integer, dimension(4) :: dimids
   integer :: err
   integer :: i
-  real(kind=real64) :: scales
+  real(kind=wp) :: scales
   integer, dimension(4) :: sizes
   integer :: varid
 
@@ -246,17 +249,17 @@ subroutine variable_data_double_4d(ncid, name, buffer, start, counts)
   call netcdf_catch(err)
   err = nf90_get_att(ncid, varid, "scale_factor", scales)
   if (err .eq. nf90_enotatt) then
-    scales = 1._real64
+    scales = 1._wp
   else
     call netcdf_catch(err)
   endif
   err = nf90_get_att(ncid, varid, "add_offset", add)
   if (err .eq. nf90_enotatt) then
-    add = 0._real64
+    add = 0._wp
   else
     call netcdf_catch(err)
   endif
-  if (scales .ne. 1._real64 .or. add .ne. 0._real64) then
+  if (scales .ne. 1._wp .or. add .ne. 0._wp) then
     buffer(:,:,:,:) = buffer(:,:,:,:)*scales + add
   endif
 end subroutine variable_data_double_4d
@@ -264,8 +267,8 @@ end subroutine variable_data_double_4d
 
 subroutine xyt_to_bnt(dest, src)
 
-  real(kind=real64), dimension(:,:,:), intent(inout) :: dest
-  real(kind=real64), dimension(:,:,:), intent(in) :: src
+  real(kind=wp), dimension(:,:,:), intent(inout) :: dest
+  real(kind=wp), dimension(:,:,:), intent(in) :: src
 
   integer :: block_id
   integer :: block_spot
@@ -292,8 +295,8 @@ end subroutine xyt_to_bnt
 
 subroutine xyzt_to_bznt(dest, src)
 
-  real(kind=real64), dimension(:,:,:,:), intent(inout) :: dest
-  real(kind=real64), dimension(:,:,:,:), intent(in) :: src
+  real(kind=wp), dimension(:,:,:,:), intent(inout) :: dest
+  real(kind=wp), dimension(:,:,:,:), intent(in) :: src
 
   integer :: block_id
   integer :: block_spot
@@ -331,60 +334,60 @@ subroutine create_atmosphere(atm, parser)
     integer :: id
     character(len=8) :: flag
     character(len=32) :: name
-    real(kind=real64) :: mass
+    real(kind=wp) :: mass
   end type MoleculeMeta_t
 
-  real(kind=real64), dimension(:,:,:,:), allocatable :: abundance
-  real(kind=real64), dimension(:,:,:,:), allocatable :: air_density
-  real(kind=real64), dimension(:,:,:), allocatable :: albedo
+  real(kind=wp), dimension(:,:,:,:), allocatable :: abundance
+  real(kind=wp), dimension(:,:,:,:), allocatable :: air_density
+  real(kind=wp), dimension(:,:,:), allocatable :: albedo
   character(len=valuelen) :: buffer
-  real(kind=real64), dimension(:,:,:,:), allocatable :: cloud_fraction
+  real(kind=wp), dimension(:,:,:,:), allocatable :: cloud_fraction
   integer, dimension(4) :: counts
-  real(kind=real64), parameter :: dry_air_mass = 28.9647_real64 ![g mol-1].
-  real(kind=real64), parameter :: from_ppmv = 1.e-6_real64
+  real(kind=wp), parameter :: dry_air_mass = 28.9647_wp ![g mol-1].
+  real(kind=wp), parameter :: from_ppmv = 1.e-6_wp
   integer :: err
   integer :: global_nlat
   integer :: global_nlon
   integer :: i
-  real(kind=real64) :: input_abundance
-  real(kind=real64), dimension(:,:,:), allocatable :: irradiance
+  real(kind=wp) :: input_abundance
+  real(kind=wp), dimension(:,:,:), allocatable :: irradiance
   integer :: j
   integer :: k
-  real(kind=real64), parameter :: kg_to_g = 1000._real64 ![g kg-1].
-  real(kind=real64), dimension(:), allocatable :: latitude
-  real(kind=real64), dimension(:,:,:,:), allocatable :: level_pressure
-  real(kind=real64), dimension(:,:,:,:), allocatable :: level_temperature
+  real(kind=wp), parameter :: kg_to_g = 1000._wp ![g kg-1].
+  real(kind=wp), dimension(:), allocatable :: latitude
+  real(kind=wp), dimension(:,:,:,:), allocatable :: level_pressure
+  real(kind=wp), dimension(:,:,:,:), allocatable :: level_temperature
   integer :: m
-  real(kind=real64), parameter :: mb_to_pa = 100._real64 ![Pa mb-1].
-  real(kind=real64) :: mean_irradiance
+  real(kind=wp), parameter :: mb_to_pa = 100._wp ![Pa mb-1].
+  real(kind=wp) :: mean_irradiance
   integer :: ncid
   integer :: nlayer
-  real(kind=real64), parameter :: pi = 3.14159265359_real64
-  real(kind=real64), dimension(:,:,:,:), allocatable :: pressure
-  real(kind=real64), parameter :: r_dry_air = 287.058_real64 ![J kg-1 K-1].
-  real(kind=real64), parameter :: r_h2o = 461.495_real64 ![J kg-1 K-1].
-! real(kind=real64), parameter :: seconds_per_day = 86400._real64 ![s day-1].
-  real(kind=real64), parameter :: seconds_per_hour = 3600._real64 ![s day-1].
+  real(kind=wp), parameter :: pi = 3.14159265359_wp
+  real(kind=wp), dimension(:,:,:,:), allocatable :: pressure
+  real(kind=wp), parameter :: r_dry_air = 287.058_wp ![J kg-1 K-1].
+  real(kind=wp), parameter :: r_h2o = 461.495_wp ![J kg-1 K-1].
+! real(kind=wp), parameter :: seconds_per_day = 86400._wp ![s day-1].
+  real(kind=wp), parameter :: seconds_per_hour = 3600._wp ![s day-1].
   integer, dimension(4) :: start
-  real(kind=real64), dimension(:,:,:), allocatable :: surface_pressure
-  real(kind=real64), dimension(:,:,:), allocatable :: surface_temperature
+  real(kind=wp), dimension(:,:,:), allocatable :: surface_pressure
+  real(kind=wp), dimension(:,:,:), allocatable :: surface_temperature
   integer :: t_start
   integer :: t_stop
-  real(kind=real64), dimension(:,:,:,:), allocatable :: temperature
-  real(kind=real64) :: total_weight
-  real(kind=real64), dimension(:,:,:), allocatable :: two_meter_temperature
-  real(kind=real64), parameter :: water_mass = 18.02_real64 ![g mol-1].
-  real(kind=real64), dimension(:), allocatable :: weights
+  real(kind=wp), dimension(:,:,:,:), allocatable :: temperature
+  real(kind=wp) :: total_weight
+  real(kind=wp), dimension(:,:,:), allocatable :: two_meter_temperature
+  real(kind=wp), parameter :: water_mass = 18.02_wp ![g mol-1].
+  real(kind=wp), dimension(:), allocatable :: weights
   integer :: x_start
   integer :: x_stop
-  real(kind=real64), dimension(:,:,:,:), allocatable :: xh2o
-  real(kind=real64), dimension(:), allocatable :: xmol
+  real(kind=wp), dimension(:,:,:,:), allocatable :: xh2o
+  real(kind=wp), dimension(:), allocatable :: xmol
   integer :: y_start
   integer :: y_stop
-  real(kind=real64) :: year
+  real(kind=wp) :: year
   integer :: z_start
   integer :: z_stop
-  real(kind=real64), dimension(:,:,:), allocatable :: zenith
+  real(kind=wp), dimension(:,:,:), allocatable :: zenith
   type(MoleculeMeta_t), dimension(num_molecules) :: molecules
 
   !Add/parse command line arguments.
@@ -498,7 +501,7 @@ subroutine create_atmosphere(atm, parser)
   global_nlat = dimension_length(ncid, "lat")
   call variable_data(ncid, "lat", latitude)
   allocate(weights(global_nlat))
-  weights(:) = cos(2._real64*pi*latitude(:)/360._real64)
+  weights(:) = cos(2._wp*pi*latitude(:)/360._wp)
   total_weight = sum(weights)
   deallocate(latitude)
   start(1) = 1; start(2) = 1; start(3) = t_start;
@@ -507,11 +510,11 @@ subroutine create_atmosphere(atm, parser)
   irradiance(:,:,:) = irradiance(:,:,:)/seconds_per_hour
   allocate(atm%total_solar_irradiance(atm%num_times))
   do i = 1, atm%num_times
-    mean_irradiance = 0._real64
+    mean_irradiance = 0._wp
     do j = 1, global_nlat
       mean_irradiance = mean_irradiance + sum(irradiance(:,j,i))*weights(j)
     enddo
-    atm%total_solar_irradiance(i) = 4._real64*mean_irradiance/(global_nlon*total_weight)
+    atm%total_solar_irradiance(i) = 4._wp*mean_irradiance/(global_nlon*total_weight)
   enddo
   deallocate(weights)
   allocate(zenith(nlon, nlat, atm%num_times))
@@ -584,7 +587,7 @@ subroutine create_atmosphere(atm, parser)
   !Store axis data so it can be copied to the output file.
   allocate(atm%level(atm%num_levels))
   do i = 1, atm%num_levels
-    atm%level(i) = real(i, kind=real64)
+    atm%level(i) = real(i, kind=wp)
   enddo
 
   !Pressure.
@@ -595,14 +598,14 @@ subroutine create_atmosphere(atm, parser)
   allocate(atm%layer_pressure(block_size, atm%num_layers, num_blocks, atm%num_times))
   call xyzt_to_bznt(atm%layer_pressure, pressure)
   allocate(level_pressure(nlon, nlat, atm%num_levels, atm%num_times))
-  level_pressure(:,:,1,:) = pressure(:,:,1,:)*0.5_real64
+  level_pressure(:,:,1,:) = pressure(:,:,1,:)*0.5_wp
   level_pressure(:,:,atm%num_levels,:) = surface_pressure(:,:,:)
   deallocate(surface_pressure)
   do m = 1, atm%num_times
     do k = 2, atm%num_layers
       do j = 1, nlat
         do i = 1, nlon
-          level_pressure(i,j,k,m) = 0.5_real64*(pressure(i,j,k-1,m) + pressure(i,j,k,m))
+          level_pressure(i,j,k,m) = 0.5_wp*(pressure(i,j,k-1,m) + pressure(i,j,k,m))
         enddo
       enddo
     enddo
@@ -655,7 +658,7 @@ subroutine create_atmosphere(atm, parser)
   deallocate(abundance)
 
   !Convert from (mass water)/(mass total air) to (mole water)/(mole dry air).
-  xh2o(:,:,:,:) = (dry_air_mass/water_mass)*xh2o(:,:,:,:)/(1._real64 - xh2o(:,:,:,:))
+  xh2o(:,:,:,:) = (dry_air_mass/water_mass)*xh2o(:,:,:,:)/(1._wp - xh2o(:,:,:,:))
 
   !Read water vapor and ozone from the level file.
   molecules(1)%id = h2o
@@ -663,7 +666,7 @@ subroutine create_atmosphere(atm, parser)
   molecules(2)%id = o3
   molecules(2)%flag = "-O3"
   molecules(2)%name = "o3"
-  molecules(2)%mass = 47.997_real64
+  molecules(2)%mass = 47.997_wp
   do i = 1, 2
     call get_argument(parser, trim(molecules(i)%flag), buffer)
     if (trim(buffer) .ne. "not present") then
@@ -756,13 +759,13 @@ subroutine create_atmosphere(atm, parser)
   atm%clear = trim(buffer) .eq. "not present"
   if (.not. atm%clear) then
     !Convert from (mole water)/(mole dry air) to (mole water)/(mole total air).
-    xh2o(:,:,:,:) = xh2o(:,:,:,:)/(1._real64 + xh2o(:,:,:,:))
+    xh2o(:,:,:,:) = xh2o(:,:,:,:)/(1._wp + xh2o(:,:,:,:))
 
     !Calculate total air density.
     allocate(air_density(block_size, atm%num_layers, num_blocks, atm%num_times))
     air_density = (xh2o(:,:,:,:)*atm%layer_pressure(:,:,:,:))/ &
                   (r_h2o*atm%layer_temperature(:,:,:,:)) + &
-                  ((1._real64 - xh2o(:,:,:,:))*atm%layer_pressure)/ &
+                  ((1._wp - xh2o(:,:,:,:))*atm%layer_pressure)/ &
                   (r_dry_air*atm%layer_temperature(:,:,:,:))
 
     !Calculate layer thickness.
@@ -838,7 +841,7 @@ subroutine add_variable(output, dimid, indx, name, standard_name, units, fill_va
   character(len=*), intent(in) :: name !< Variable name.
   character(len=*), intent(in) :: standard_name !< Variable standard name.
   character(len=*), intent(in), optional :: units !< Variable units.
-  real(kind=real64), intent(in), optional :: fill_value !< Fill value.
+  real(kind=wp), intent(in), optional :: fill_value !< Fill value.
   character(len=*), intent(in), optional :: positive !< Vertical sense.
 
   integer :: error
@@ -888,7 +891,7 @@ subroutine create_flux_file(output, filepath, atm)
   call netcdf_catch(error)
   error = nf90_def_dim(output%ncid, "lat", nlat, output%dimid(lat))
   call netcdf_catch(error)
-  error = nf90_def_dim(output%ncid, "level", atm.num_levels, output%dimid(level))
+  error = nf90_def_dim(output%ncid, "level", atm%num_levels, output%dimid(level))
   call netcdf_catch(error)
   error = nf90_def_dim(output%ncid, "time", nf90_unlimited, output%dimid(time))
   call netcdf_catch(error)
@@ -947,7 +950,7 @@ subroutine write_output(output, id, data, time, block_spot, block_id)
 
   type(Output_t), intent(inout) :: output !< Output object.
   integer, intent(in) :: id !< Variable id.
-  real(kind=real64), dimension(:,:), intent(in) :: data !< Flux data.
+  real(kind=wp), dimension(:,:), intent(in) :: data !< Flux data.
   integer, intent(in) :: time !< Time index.
   integer, intent(in) :: block_spot !< Index in block dimension.
   integer, intent(in) :: block_id !< Index in num_blocks dimension.

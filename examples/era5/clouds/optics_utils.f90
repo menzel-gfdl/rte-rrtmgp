@@ -1,15 +1,16 @@
 module optics_utils
+use mo_rte_kind, only: wp
 implicit none
 private
 
 
 !> @brief Optical properties.
 type, public :: OpticalProperties
-  real, dimension(:), allocatable :: bands !< Band center wavenumbers [cm-1] (band).
-  real, dimension(:,:), allocatable :: band_limits !< Band edge wavenumbers [cm-1] (2, band).
-  real, dimension(:), allocatable :: extinction_coefficient !< Extinction coefficient (band).
-  real, dimension(:), allocatable :: single_scatter_albedo !< Single-scatter albedo (band).
-  real, dimension(:), allocatable :: asymmetry_factor !< Asymmetry factor (band).
+  real(kind=wp), dimension(:), allocatable :: bands !< Band center wavenumbers [cm-1] (band).
+  real(kind=wp), dimension(:,:), allocatable :: band_limits !< Band edge wavenumbers [cm-1] (2, band).
+  real(kind=wp), dimension(:), allocatable :: extinction_coefficient !< Extinction coefficient (band).
+  real(kind=wp), dimension(:), allocatable :: single_scatter_albedo !< Single-scatter albedo (band).
+  real(kind=wp), dimension(:), allocatable :: asymmetry_factor !< Asymmetry factor (band).
   contains
   procedure, public :: construct
   procedure, public :: destruct
@@ -24,8 +25,8 @@ contains
 pure subroutine construct(self, bands, band_limits)
 
   class(OpticalProperties), intent(inout) :: self
-  real, dimension(:), intent(in) :: bands !< Band center wavenumbers [cm-1]
-  real, dimension(2,size(bands)), intent(in) :: band_limits !< Band edge wavenumbers [cm-1].
+  real(kind=wp), dimension(:), intent(in) :: bands !< Band center wavenumbers [cm-1]
+  real(kind=wp), dimension(2,size(bands)), intent(in) :: band_limits !< Band edge wavenumbers [cm-1].
 
   integer :: n
 
@@ -56,13 +57,13 @@ end subroutine destruct
 !> @brief Linearly interpolates.
 pure function interp(x, y, newx) result(newy)
 
-  real, dimension(2), intent(in) :: x !< Domain values.
-  real, dimension(2), intent(in) :: y !< Function values
-  real, intent(in) :: newx !< New domain value.
-  real :: newy !< Interpolated function value.
+  real(kind=wp), dimension(2), intent(in) :: x !< Domain values.
+  real(kind=wp), dimension(2), intent(in) :: y !< Function values
+  real(kind=wp), intent(in) :: newx !< New domain value.
+  real(kind=wp) :: newy !< Interpolated function value.
 
-  real :: m
-  real :: b
+  real(kind=wp) :: m
+  real(kind=wp) :: b
 
   m = (y(2) - y(1))/(x(2) - x(1))
   b = y(1) - m*x(1)

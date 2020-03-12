@@ -1,5 +1,7 @@
 !> @brief Subcolumn generator for calculating stochastic clouds.
 module stochastic_clouds
+use mo_rte_kind, only: wp
+
 use incomplete_beta, only: IncompleteBeta
 implicit none
 private
@@ -29,11 +31,11 @@ contains
 !! doi: 10.1256/qj.03.99.
 subroutine cloudiness(overlap_parameter, x)
 
-  real, dimension(:), intent(in) :: overlap_parameter !< Overlap parameter between adjacent layers.
-  real, dimension(:), intent(out) :: x !< A random number for each layer.
+  real(kind=wp), dimension(:), intent(in) :: overlap_parameter !< Overlap parameter between adjacent layers.
+  real(kind=wp), dimension(:), intent(out) :: x !< A random number for each layer.
 
   integer :: i
-  real, dimension(size(x)-1) :: r
+  real(kind=wp), dimension(size(x)-1) :: r
 
   call random_number(x)
   call random_number(r)
@@ -72,9 +74,9 @@ end subroutine destruct
 !!        doi: 10.1029/2004JD005100.
 pure subroutine overlap_parameter(altitude, scale_length, alpha)
 
-  real, dimension(:), intent(in) :: altitude !< Layer altitude.
-  real, intent(in) :: scale_length !< Scale length.
-  real, dimension(:), intent(out) :: alpha !< Overlap parameter between adjacent layers.
+  real(kind=wp), dimension(:), intent(in) :: altitude !< Layer altitude.
+  real(kind=wp), intent(in) :: scale_length !< Scale length.
+  real(kind=wp), dimension(:), intent(out) :: alpha !< Overlap parameter between adjacent layers.
 
   integer :: n
 
@@ -92,18 +94,18 @@ end subroutine overlap_parameter
 subroutine sample_condensate(self, cloud_fraction, lwc, iwc, overlap, ql, qi)
 
   class(TotalWaterPDF), intent(in) :: self
-  real, dimension(:), intent(in) :: cloud_fraction !< Saturated volume fraction.
-  real, dimension(:), intent(in) :: lwc !< Cloud liquid water condensate mixing ratio in dry air [kg/kg].
-  real, dimension(:), intent(in) :: iwc !< Cloud ice water condensate mixing ratio in dry air [kg/kg].
-  real, dimension(:), intent(in) :: overlap !< Overlap parameter between adjacent layers.
-  real, dimension(:), intent(out) :: ql !< Cloud liquid water condensate mixing ratio in dry air [kg/kg].
-  real, dimension(:), intent(out) :: qi !< Cloud ice water condensate mixing ratio in dry air [kg/kg].
+  real(kind=wp), dimension(:), intent(in) :: cloud_fraction !< Saturated volume fraction.
+  real(kind=wp), dimension(:), intent(in) :: lwc !< Cloud liquid water condensate mixing ratio in dry air [kg/kg].
+  real(kind=wp), dimension(:), intent(in) :: iwc !< Cloud ice water condensate mixing ratio in dry air [kg/kg].
+  real(kind=wp), dimension(:), intent(in) :: overlap !< Overlap parameter between adjacent layers.
+  real(kind=wp), dimension(:), intent(out) :: ql !< Cloud liquid water condensate mixing ratio in dry air [kg/kg].
+  real(kind=wp), dimension(:), intent(out) :: qi !< Cloud ice water condensate mixing ratio in dry air [kg/kg].
 
-  real, dimension(size(cloud_fraction)) :: liquid_fraction
-  real, dimension(size(cloud_fraction)) :: qs
-  real, dimension(size(cloud_fraction)) :: total_condensate
-  real, dimension(size(cloud_fraction)) :: width
-  real, dimension(size(cloud_fraction)) :: x
+  real(kind=wp), dimension(size(cloud_fraction)) :: liquid_fraction
+  real(kind=wp), dimension(size(cloud_fraction)) :: qs
+  real(kind=wp), dimension(size(cloud_fraction)) :: total_condensate
+  real(kind=wp), dimension(size(cloud_fraction)) :: width
+  real(kind=wp), dimension(size(cloud_fraction)) :: x
 
   call cloudiness(overlap, x)
   where (x .gt. (1. - cloud_fraction))
@@ -126,8 +128,8 @@ elemental pure function specific_saturation_humidity(self, cloud_fraction) &
   result(qs)
 
   class(TotalWaterPDF), intent(in) :: self
-  real, intent(in) :: cloud_fraction !< saturated volume fraction.
-  real :: qs !< Normalized saturation specific humidity in dry air [kg/kg].
+  real(kind=wp), intent(in) :: cloud_fraction !< saturated volume fraction.
+  real(kind=wp) :: qs !< Normalized saturation specific humidity in dry air [kg/kg].
 
   qs = self%beta%inverse(self%p, self%q, 1. - cloud_fraction)
 end function specific_saturation_humidity
@@ -139,11 +141,11 @@ elemental pure function width(self, cloud_fraction, lwc, iwc, qs) &
   result(w)
 
   class(TotalWaterPDF), intent(in) :: self
-  real, intent(in) :: cloud_fraction !< Saturated volume fraction.
-  real, intent(in) :: lwc !< Cloud liquid water condensate mixing ratio in dry air [kg/kg].
-  real, intent(in) :: iwc !< Cloud ice water condensate mixing ratio in dry air [kg/kg].
-  real, intent(in) :: qs !< Normalized saturation specific humidity in dry air [kg/kg].
-  real :: w !< Distribution width (b - a).
+  real(kind=wp), intent(in) :: cloud_fraction !< Saturated volume fraction.
+  real(kind=wp), intent(in) :: lwc !< Cloud liquid water condensate mixing ratio in dry air [kg/kg].
+  real(kind=wp), intent(in) :: iwc !< Cloud ice water condensate mixing ratio in dry air [kg/kg].
+  real(kind=wp), intent(in) :: qs !< Normalized saturation specific humidity in dry air [kg/kg].
+  real(kind=wp) :: w !< Distribution width (b - a).
 
   w = (lwc + iwc)/((real(self%p)/real(self%p + self%q))* &
       (1. - self%beta%value(self%p + 1, self%q, qs)) - qs*cloud_fraction)

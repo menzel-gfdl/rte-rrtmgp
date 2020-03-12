@@ -1,6 +1,9 @@
 !> @brief Ice water cloud optics parameterizations from doi: 10.1175/2009JCLI2844.1
 module ice_cloud_optics
 use, intrinsic :: iso_fortran_env, only: error_unit
+
+use mo_rte_kind, only: wp
+
 use netcdf_utils, only: close_dataset, open_dataset, read_attribute, read_variable
 use optics_utils, only: OpticalProperties
 implicit none
@@ -9,13 +12,13 @@ private
 
 !> @brief Ice water cloud optics parameterizations.
 type, public :: IceCloudOptics
-  real, dimension(:,:), allocatable :: a !< a parameters from equations 4a/5a (6, band).
-  real, dimension(:,:), allocatable :: b !< b parameters from equations 4b/5b (6, band).
-  real, dimension(:,:), allocatable :: band_limits !< Parameterization band limits [cm-1] (2, bands).
-  real, dimension(:), allocatable :: bands !< Parameterization band centers [cm-1] (band).
-  real, dimension(:,:,:), allocatable :: c !< c parameters from equations 4c/5c (6, band, radius).
+  real(kind=wp), dimension(:,:), allocatable :: a !< a parameters from equations 4a/5a (6, band).
+  real(kind=wp), dimension(:,:), allocatable :: b !< b parameters from equations 4b/5b (6, band).
+  real(kind=wp), dimension(:,:), allocatable :: band_limits !< Parameterization band limits [cm-1] (2, bands).
+  real(kind=wp), dimension(:), allocatable :: bands !< Parameterization band centers [cm-1] (band).
+  real(kind=wp), dimension(:,:,:), allocatable :: c !< c parameters from equations 4c/5c (6, band, radius).
   integer :: last_ir_band !< Index of last infrared (longwave) band.
-  real, dimension(:,:), allocatable :: radii !< Radius bins [micron] for the parameterization (2, radius).
+  real(kind=wp), dimension(:,:), allocatable :: radii !< Radius bins [micron] for the parameterization (2, radius).
   contains
   procedure, public :: construct
   procedure, public :: destruct
@@ -67,8 +70,8 @@ elemental pure subroutine optics(self, ice_concentration, equivalent_radius, &
                                  optical_properties)
 
   class(IceCloudOptics), intent(in) :: self
-  real, intent(in) :: ice_concentration !< Ice concentration [g m-3].
-  real, intent(in) :: equivalent_radius !< Particle equivalent radius [micron].
+  real(kind=wp), intent(in) :: ice_concentration !< Ice concentration [g m-3].
+  real(kind=wp), intent(in) :: equivalent_radius !< Particle equivalent radius [micron].
   type(OpticalProperties), intent(inout) :: optical_properties
 
   integer :: i
@@ -88,19 +91,19 @@ elemental pure subroutine optics_(self, ice_concentration, equivalent_radius, ba
                                   asymmetry_factor)
 
   class(IceCloudOptics), intent(in) :: self
-  real, intent(in) :: ice_concentration !< Ice concentration [g m-3].
-  real, intent(in) :: equivalent_radius !< Particle equivalent radius [micron].
+  real(kind=wp), intent(in) :: ice_concentration !< Ice concentration [g m-3].
+  real(kind=wp), intent(in) :: equivalent_radius !< Particle equivalent radius [micron].
   integer, intent(in) :: band !< Band index.
-  real, intent(out) :: extinction_coefficient !< Extinction coefficient [cm-1].
-  real, intent(out) :: single_scatter_albedo !< Single-scatter albedo.
-  real, intent(out) :: asymmetry_factor !< Asymmetry factor.
+  real(kind=wp), intent(out) :: extinction_coefficient !< Extinction coefficient [cm-1].
+  real(kind=wp), intent(out) :: single_scatter_albedo !< Single-scatter albedo.
+  real(kind=wp), intent(out) :: asymmetry_factor !< Asymmetry factor.
 
-  real, dimension(size(self%a, 1)) :: d
-  real, dimension(size(self%a, 1)) :: d_inv
+  real(kind=wp), dimension(size(self%a, 1)) :: d
+  real(kind=wp), dimension(size(self%a, 1)) :: d_inv
   integer :: i
-  real, parameter :: min_radius = 12.
+  real(kind=wp), parameter :: min_radius = 12.
   integer :: r
-  real :: radius
+  real(kind=wp) :: radius
 
   do r = 2, size(self%radii, 2)
     if (self%radii(1,r) .gt. equivalent_radius) then

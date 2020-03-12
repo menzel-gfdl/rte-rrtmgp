@@ -1,6 +1,8 @@
 !> @brief Slingo liquid water cloud optics parameterization from
 !! doi: 10.1175/1520-0469(1989)046<1419:AGPFTS>2.0.CO;2.
 module slingo_liquid_cloud
+use mo_rte_kind, only: wp
+
 use netcdf_utils, only: close_dataset, open_dataset, read_attribute, read_variable
 use optics_utils, only: OpticalProperties
 implicit none
@@ -9,16 +11,16 @@ private
 
 !> @brief Slingo liquid water cloud optics parameterization.
 type, public :: Slingo
-  real, dimension(:), allocatable :: a !< Optical depth coefficients [g-1 m2] (band).
-  real, dimension(:), allocatable :: b !< Optical depth coefficients [g-1 m2 micron] (band).
-  real, dimension(:,:), allocatable :: band_limits !< Parameterization band limits [cm-1] (2, band).
-  real, dimension(:), allocatable :: bands !< Parameterization band centers [cm-1].
-  real, dimension(:), allocatable :: c !< Single-scatter albedo coefficients (band).
-  real, dimension(:), allocatable :: d !< Single-scatter albedo coefficients [micron-1] (band).
-  real, dimension(:), allocatable :: e !< Asymmetry factor coefficients (band).
-  real, dimension(:), allocatable :: f !< Asymmetry factor coefficients [micron-1] (band).
-  real :: max_radius !< Maximum radius defined in parameterization [micron].
-  real :: min_radius !< Minimum radius defined in parameterization [micron].
+  real(kind=wp), dimension(:), allocatable :: a !< Optical depth coefficients [g-1 m2] (band).
+  real(kind=wp), dimension(:), allocatable :: b !< Optical depth coefficients [g-1 m2 micron] (band).
+  real(kind=wp), dimension(:,:), allocatable :: band_limits !< Parameterization band limits [cm-1] (2, band).
+  real(kind=wp), dimension(:), allocatable :: bands !< Parameterization band centers [cm-1].
+  real(kind=wp), dimension(:), allocatable :: c !< Single-scatter albedo coefficients (band).
+  real(kind=wp), dimension(:), allocatable :: d !< Single-scatter albedo coefficients [micron-1] (band).
+  real(kind=wp), dimension(:), allocatable :: e !< Asymmetry factor coefficients (band).
+  real(kind=wp), dimension(:), allocatable :: f !< Asymmetry factor coefficients [micron-1] (band).
+  real(kind=wp) :: max_radius !< Maximum radius defined in parameterization [micron].
+  real(kind=wp) :: min_radius !< Minimum radius defined in parameterization [micron].
   contains
   procedure, public :: construct
   procedure, public :: destruct
@@ -75,8 +77,8 @@ elemental pure subroutine optics(self, water_concentration, equivalent_radius, &
                                  optical_properties)
 
   class(Slingo), intent(in) :: self
-  real, intent(in) :: water_concentration !< Water concentration [g m-3].
-  real, intent(in) :: equivalent_radius !< Particle equivalent radius [micron].
+  real(kind=wp), intent(in) :: water_concentration !< Water concentration [g m-3].
+  real(kind=wp), intent(in) :: equivalent_radius !< Particle equivalent radius [micron].
   type(OpticalProperties), intent(inout) :: optical_properties !< Optical properties.
 
   integer :: i
@@ -96,14 +98,14 @@ elemental pure subroutine optics_(self, water_concentration, equivalent_radius, 
                                   asymmetry_factor)
 
   class(Slingo), intent(in) :: self
-  real, intent(in) :: water_concentration !< Water concentration [g m-3].
-  real, intent(in) :: equivalent_radius !< Droplet equivalent radius [micron].
+  real(kind=wp), intent(in) :: water_concentration !< Water concentration [g m-3].
+  real(kind=wp), intent(in) :: equivalent_radius !< Droplet equivalent radius [micron].
   integer, intent(in) :: band !< Band index.
-  real, intent(out) :: extinction_coefficient !< Extinction coefficient.
-  real, intent(out) :: single_scatter_albedo !< Single-scatter albedo.
-  real, intent(out) :: asymmetry_factor !< Asymmetry factor.
+  real(kind=wp), intent(out) :: extinction_coefficient !< Extinction coefficient.
+  real(kind=wp), intent(out) :: single_scatter_albedo !< Single-scatter albedo.
+  real(kind=wp), intent(out) :: asymmetry_factor !< Asymmetry factor.
 
-  real :: r
+  real(kind=wp) :: r
 
   r = min(self%max_radius, max(self%min_radius, equivalent_radius))
   extinction_coefficient = water_concentration*(self%a(band) + self%b(band)/r) !Equation 1.

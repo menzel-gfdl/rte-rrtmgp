@@ -1,6 +1,8 @@
 !> @brief Hu and Stamnes cloud liquid water parameterization from
 !! doi: 10.1175/1520-0442(1993)006<0728:AAPOTR>2.0.CO;2
 module hu_stamnes
+use mo_rte_kind, only: wp
+
 use netcdf_utils, only: close_dataset, open_dataset, read_attribute, read_variable
 use optics_utils, only: OpticalProperties
 implicit none
@@ -9,21 +11,21 @@ private
 
 !> @brief Hu and Stamnes cloud liquid water parameterization.
 type, public :: HuStamnes
-  real, dimension(:,:), allocatable :: a1 !< Exctinction coefficient parameter (band, radius).
-  real, dimension(:,:), allocatable :: a2 !< Single-scatter albedo parameter (band, radius).
-  real, dimension(:,:), allocatable :: a3 !< Asymmetry factor parameter (band, radius).
-  real, dimension(:,:), allocatable :: band_limits !< Lower/upper bounds of parameterization [cm-1] (2, band).
-  real, dimension(:), allocatable :: bands !< Parameterization band centers [cm-1] (band).
-  real, dimension(:,:), allocatable :: b1 !< Exctinction coefficient parameter (band, radius).
-  real, dimension(:,:), allocatable :: b2 !< Single-scatter albedo parameter (band, radius).
-  real, dimension(:,:), allocatable :: b3 !< Asymmetry factor parameter (band, radius).
-  real, dimension(:,:), allocatable :: c1 !< Exctinction coefficient parameter (band, radius).
-  real, dimension(:,:), allocatable :: c2 !< Single-scatter albedo parameter (band, radius).
-  real, dimension(:,:), allocatable :: c3 !< Asymmetry factor parameter (band, radius).
+  real(kind=wp), dimension(:,:), allocatable :: a1 !< Exctinction coefficient parameter (band, radius).
+  real(kind=wp), dimension(:,:), allocatable :: a2 !< Single-scatter albedo parameter (band, radius).
+  real(kind=wp), dimension(:,:), allocatable :: a3 !< Asymmetry factor parameter (band, radius).
+  real(kind=wp), dimension(:,:), allocatable :: band_limits !< Lower/upper bounds of parameterization [cm-1] (2, band).
+  real(kind=wp), dimension(:), allocatable :: bands !< Parameterization band centers [cm-1] (band).
+  real(kind=wp), dimension(:,:), allocatable :: b1 !< Exctinction coefficient parameter (band, radius).
+  real(kind=wp), dimension(:,:), allocatable :: b2 !< Single-scatter albedo parameter (band, radius).
+  real(kind=wp), dimension(:,:), allocatable :: b3 !< Asymmetry factor parameter (band, radius).
+  real(kind=wp), dimension(:,:), allocatable :: c1 !< Exctinction coefficient parameter (band, radius).
+  real(kind=wp), dimension(:,:), allocatable :: c2 !< Single-scatter albedo parameter (band, radius).
+  real(kind=wp), dimension(:,:), allocatable :: c3 !< Asymmetry factor parameter (band, radius).
   integer :: last_ir_band !< Index of last infrared (longwave) band.
-  real :: max_radius !< Maximum radius defined in parameterization [micron].
-  real :: min_radius !< Minimum radius defined in parameterization [micron].
-  real, dimension(:), allocatable :: radii !< Radius bins [micron] for parameterization (radius).
+  real(kind=wp) :: max_radius !< Maximum radius defined in parameterization [micron].
+  real(kind=wp) :: min_radius !< Minimum radius defined in parameterization [micron].
+  real(kind=wp), dimension(:), allocatable :: radii !< Radius bins [micron] for parameterization (radius).
   contains
   procedure, public :: construct
   procedure, public :: destruct
@@ -44,8 +46,8 @@ subroutine construct(self, path)
   integer :: n
   character(len=:), allocatable :: name
   integer :: ncid
-  real, dimension(2) :: radii
-  real, dimension(:,:), allocatable :: radius_bounds
+  real(kind=wp), dimension(2) :: radii
+  real(kind=wp), dimension(:,:), allocatable :: radius_bounds
 
   ncid = open_dataset(path)
   call read_attribute(ncid, "radius", "bounds", name)
@@ -100,8 +102,8 @@ elemental pure subroutine optics(self, water_concentration, equivalent_radius, &
                                  optical_properties)
 
   class(HuStamnes), intent(in) :: self
-  real, intent(in) :: water_concentration !< Water concentration [g m-3].
-  real, intent(in) :: equivalent_radius !< Particle equivalent radius [micron].
+  real(kind=wp), intent(in) :: water_concentration !< Water concentration [g m-3].
+  real(kind=wp), intent(in) :: equivalent_radius !< Particle equivalent radius [micron].
   type(OpticalProperties), intent(inout) :: optical_properties !< Optical properties.
 
   integer :: i
@@ -121,16 +123,16 @@ elemental pure subroutine optics_(self, water_concentration, equivalent_radius, 
                                   asymmetry_factor)
 
   class(HuStamnes), intent(in) :: self
-  real, intent(in) :: water_concentration !< Water concentration [g m-3].
-  real, intent(in) :: equivalent_radius !< Droplet equivalent radius [micron].
+  real(kind=wp), intent(in) :: water_concentration !< Water concentration [g m-3].
+  real(kind=wp), intent(in) :: equivalent_radius !< Droplet equivalent radius [micron].
   integer, intent(in) :: band !< Band index.
-  real, intent(out) :: extinction_coefficient !< Extinction coefficient [cm-1] (grid).
-  real, intent(out) :: single_scatter_albedo !< Single-scatter albedo (grid).
-  real, intent(out) :: asymmetry_factor !< Asymmetry factor (grid).
+  real(kind=wp), intent(out) :: extinction_coefficient !< Extinction coefficient [cm-1] (grid).
+  real(kind=wp), intent(out) :: single_scatter_albedo !< Single-scatter albedo (grid).
+  real(kind=wp), intent(out) :: asymmetry_factor !< Asymmetry factor (grid).
 
-  real, parameter :: cm_to_km = 1.e-5
+  real(kind=wp), parameter :: cm_to_km = 1.e-5
   integer :: i
-  real :: r
+  real(kind=wp) :: r
 
   r = min(self%max_radius, max(self%min_radius, equivalent_radius))
   do i = 2, size(self%radii)

@@ -81,7 +81,7 @@ $(clouds)/stochastic_clouds.lo: $(clouds)/incomplete_beta.lo
 
 
 era5 = $(top_srcdir)/examples/era5
-bin_PROGRAMS = era5
+bin_PROGRAMS = era5 rrtmgp_rfmip_lw rrtmgp_rfmip_sw rrtmgp_allsky
 era5_SOURCES = $(era5)/argparse.f90 \
                $(era5)/era5.f90 \
                $(era5)/main.f90 \
@@ -96,6 +96,43 @@ $(era5)/main.$(OBJEXT): $(era5)/era5.$(OBJEXT) \
                         $(era5)/argparse.$(OBJEXT) \
                         $(top_srcdir)/examples/mo_load_coefficients.$(OBJEXT)
 $(top_srcdir)/examples/mo_load_coefficients.$(OBJEXT): $(top_srcdir)/examples/mo_simple_netcdf.$(OBJEXT)
+
+
+rfmip_clearsky = $(top_srcdir)/examples/rfmip-clear-sky
+rrtmgp_rfmip_lw_SOURCES = $(rfmip_clearsky)/mo_rfmip_io.F90 \
+                          $(rfmip_clearsky)/rrtmgp_rfmip_lw.F90 \
+                          $(top_srcdir)/examples/mo_load_coefficients.F90 \
+                          $(top_srcdir)/examples/mo_simple_netcdf.F90
+rrtmgp_rfmip_lw_LDADD = $(top_builddir)/librte.la \
+                        $(top_builddir)/librrtmgp.la
+$(rfmip_clearsky)/mo_rfmip_io.$(OBJEXT): $(top_srcdir)/examples/mo_simple_netcdf.$(OBJEXT)
+$(rfmip_clearsky)/rrtmgp_rfmip_lw.$(OBJEXT): $(rfmip_clearsky)/mo_rfmip_io.$(OBJEXT) \
+                                             $(top_srcdir)/examples/mo_load_coefficients.$(OBJEXT) \
+                                             $(top_srcdir)/examples/mo_simple_netcdf.$(OBJEXT)
+rrtmgp_rfmip_sw_SOURCES = $(rfmip_clearsky)/mo_rfmip_io.F90 \
+                          $(rfmip_clearsky)/rrtmgp_rfmip_sw.F90 \
+                          $(top_srcdir)/examples/mo_load_coefficients.F90 \
+                          $(top_srcdir)/examples/mo_simple_netcdf.F90
+rrtmgp_rfmip_sw_LDADD = $(top_builddir)/librte.la \
+                        $(top_builddir)/librrtmgp.la
+$(rfmip_clearsky)/rrtmgp_rfmip_sw.$(OBJEXT): $(rfmip_clearsky)/mo_rfmip_io.$(OBJEXT) \
+                                             $(top_srcdir)/examples/mo_load_coefficients.$(OBJEXT) \
+                                             $(top_srcdir)/examples/mo_simple_netcdf.$(OBJEXT)
+
+
+allsky = $(top_srcdir)/examples/all-sky
+cloud_optics = $(top_srcdir)/extensions/cloud_optics
+rrtmgp_allsky_SOURCES = $(allsky)/mo_garand_atmos_io.F90 \
+                        $(allsky)/mo_load_cloud_coefficients.F90 \
+                        $(allsky)/rrtmgp_allsky.F90 \
+                        $(cloud_optics)/mo_cloud_optics.F90 \
+                        $(top_srcdir)/examples/mo_load_coefficients.F90 \
+                        $(top_srcdir)/examples/mo_simple_netcdf.F90
+rrtmgp_allsky_LDADD = $(top_builddir)/librte.la \
+                      $(top_builddir)/librrtmgp.la
+$(allsky)/mo_garand_atmos_io.$(OBJEXT): $(top_srcdir)/examples/mo_simple_netcdf.$(OBJEXT)
+$(allsky)/mo_load_cloud_coefficients.$(OBJEXT): $(top_srcdir)/examples/mo_simple_netcdf.$(OBJEXT) \
+                                                $(cloud_optics)/mo_cloud_optics.$(OBJEXT)
 
 
 CLEANFILES = *.mod

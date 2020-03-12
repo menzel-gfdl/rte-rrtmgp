@@ -57,3 +57,6 @@ m4/lt~obsolete.m4
 
 # local binaries.
 /era5
+/rrtmgp_rfmip_lw
+/rrtmgp_rfmip_sw
+/rrtmgp_allsky

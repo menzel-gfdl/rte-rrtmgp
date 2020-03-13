@@ -261,48 +261,60 @@ end subroutine read_global_attribute_real
 
 
 !> @brief Reads variable from netCDF dataset.
-subroutine read_variable_1d_string(ncid, name, buffer)
+subroutine read_variable_1d_string(ncid, name, buffer, start, counts)
 
   integer, intent(in) :: ncid !< NetCDF id.
   character(len=*), intent(in) :: name !< Variable name.
   character(len=*), dimension(:), allocatable, intent(inout) :: buffer
+  integer, dimension(:), intent(in), optional :: start !< Corner indices
+  integer, dimension(:), intent(in), optional :: counts !< Edge lengths.
 
-  integer, dimension(2) :: dimids
+  integer, dimension(nf90_max_dims) :: dimids
   integer :: err
   integer :: i
-  integer, dimension(2) :: sizes
+  integer :: n
+  integer, dimension(nf90_max_dims) :: sizes
+  integer, dimension(nf90_max_dims) :: starts
   integer :: varid
 
   err = nf90_inq_varid(ncid, trim(name), varid)
   call netcdf_catch(err)
-  err = nf90_inquire_variable(ncid, varid, dimids=dimids)
+  err = nf90_inquire_variable(ncid, varid, ndims=n)
   call netcdf_catch(err)
-  do i = 1, size(dimids)
-    err = nf90_inquire_dimension(ncid, dimids(i), len=sizes(i))
+  if (present(counts)) then
+    sizes(:n) = counts(:n)
+  else
+    err = nf90_inquire_variable(ncid, varid, dimids=dimids)
     call netcdf_catch(err)
-  enddo
+    do i = 1, n
+      err = nf90_inquire_dimension(ncid, dimids(i), len=sizes(i))
+      call netcdf_catch(err)
+    enddo
+  endif
   if (allocated(buffer)) deallocate(buffer)
   allocate(buffer(sizes(2)))
-  err = nf90_get_var(ncid, varid, buffer)
+  err = nf90_get_var(ncid, varid, buffer, start, sizes)
   call netcdf_catch(err)
 end subroutine read_variable_1d_string
 
 
 !> @brief Reads variable from netCDF dataset.
-subroutine read_variable_0d_int(ncid, name, buffer)
+subroutine read_variable_0d_int(ncid, name, buffer, start)
 
   integer, intent(in) :: ncid !< NetCDF id.
   character(len=*), intent(in) :: name !< Variable name.
   integer, intent(inout) :: buffer
+  integer, dimension(:), intent(in), optional :: start !< Corner indices
 
   integer :: add
   integer :: err
+  integer :: n
   integer :: scales
   integer :: varid
 
   err = nf90_inq_varid(ncid, trim(name), varid)
   call netcdf_catch(err)
-  err = nf90_get_var(ncid, varid, buffer)
+  err = nf90_get_var(ncid, varid, buffer, start)
   call netcdf_catch(err)
   err = nf90_get_att(ncid, varid, "scale_factor", scales)
   if (err .eq. nf90_enotatt) then
@@ -326,35 +338,35 @@ subroutine read_variable_1d_int(ncid, name, buffer, start, counts)
   integer, intent(in) :: ncid !< NetCDF id.
   character(len=*), intent(in) :: name !< Variable name.
   integer, dimension(:), allocatable, intent(inout) :: buffer
-  integer, intent(in), optional :: start !< Corner indices
-  integer, intent(in), optional :: counts !< Edge lengths.
+  integer, dimension(:), intent(in), optional :: start !< Corner indices
+  integer, dimension(:), intent(in), optional :: counts !< Edge lengths.
 
   integer :: add
-  integer, dimension(1) :: dimids
+  integer, dimension(nf90_max_dims) :: dimids
   integer :: err
+  integer :: i
+  integer :: n
   integer :: scales
-  integer, dimension(1) :: sizes
-  integer, dimension(1) :: starts
+  integer, dimension(nf90_max_dims) :: sizes
   integer :: varid
 
   err = nf90_inq_varid(ncid, trim(name), varid)
   call netcdf_catch(err)
-  if (present(start)) then
-    starts(1) = start
-  else
-    starts(1) = 1
-  endif
+  err = nf90_inquire_variable(ncid, varid, ndims=n)
+  call netcdf_catch(err)
   if (present(counts)) then
-    sizes(1) = counts
+    sizes(:n) = counts(:n)
   else
     err = nf90_inquire_variable(ncid, varid, dimids=dimids)
     call netcdf_catch(err)
-    err = nf90_inquire_dimension(ncid, dimids(1), len=sizes(1))
-    call netcdf_catch(err)
+    do i = 1, n
+      err = nf90_inquire_dimension(ncid, dimids(i), len=sizes(i))
+      call netcdf_catch(err)
+    enddo
   endif
   if (allocated(buffer)) deallocate(buffer)
   allocate(buffer(sizes(1)))
-  err = nf90_get_var(ncid, varid, buffer, starts, sizes)
+  err = nf90_get_var(ncid, varid, buffer, start, sizes)
   call netcdf_catch(err)
   err = nf90_get_att(ncid, varid, "scale_factor", scales)
   if (err .eq. nf90_enotatt) then
@@ -378,25 +390,28 @@ subroutine read_variable_2d_int(ncid, name, buffer, start, counts)
   integer, intent(in) :: ncid !< NetCDF id.
   character(len=*), intent(in) :: name !< Variable name.
   integer, dimension(:,:), allocatable, intent(inout) :: buffer
-  integer, dimension(2), intent(in), optional :: start !< Corner indices
-  integer, dimension(2), intent(in), optional :: counts !< Edge lengths.
+  integer, dimension(:), intent(in), optional :: start !< Corner indices
+  integer, dimension(:), intent(in), optional :: counts !< Edge lengths.
 
   integer :: add
-  integer, dimension(2) :: dimids
+  integer, dimension(nf90_max_dims) :: dimids
   integer :: err
   integer :: i
+  integer :: n
   integer :: scales
-  integer, dimension(2) :: sizes
+  integer, dimension(nf90_max_dims) :: sizes
   integer :: varid
 
   err = nf90_inq_varid(ncid, trim(name), varid)
   call netcdf_catch(err)
+  err = nf90_inquire_variable(ncid, varid, ndims=n)
+  call netcdf_catch(err)
   if (present(counts)) then
-    sizes(:) = counts(:)
+    sizes(:n) = counts(:n)
   else
     err = nf90_inquire_variable(ncid, varid, dimids=dimids)
     call netcdf_catch(err)
-    do i = 1, size(dimids)
+    do i = 1, n
       err = nf90_inquire_dimension(ncid, dimids(i), len=sizes(i))
       call netcdf_catch(err)
     enddo
@@ -427,25 +442,28 @@ subroutine read_variable_3d_int(ncid, name, buffer, start, counts)
   integer, intent(in) :: ncid !< NetCDF id.
   character(len=*), intent(in) :: name !< Variable name.
   integer, dimension(:,:,:), allocatable, intent(inout) :: buffer
-  integer, dimension(3), intent(in), optional :: start !< Corner indices
-  integer, dimension(3), intent(in), optional :: counts !< Edge lengths.
+  integer, dimension(:), intent(in), optional :: start !< Corner indices
+  integer, dimension(:), intent(in), optional :: counts !< Edge lengths.
 
   integer :: add
-  integer, dimension(3) :: dimids
+  integer, dimension(nf90_max_dims) :: dimids
   integer :: err
   integer :: i
+  integer :: n
   integer :: scales
-  integer, dimension(3) :: sizes
+  integer, dimension(nf90_max_dims) :: sizes
   integer :: varid
 
   err = nf90_inq_varid(ncid, trim(name), varid)
   call netcdf_catch(err)
+  err = nf90_inquire_variable(ncid, varid, ndims=n)
+  call netcdf_catch(err)
   if (present(counts)) then
-    sizes(:) = counts(:)
+    sizes(:n) = counts(:n)
   else
     err = nf90_inquire_variable(ncid, varid, dimids=dimids)
     call netcdf_catch(err)
-    do i = 1, size(dimids)
+    do i = 1, n
       err = nf90_inquire_dimension(ncid, dimids(i), len=sizes(i))
       call netcdf_catch(err)
     enddo
@@ -471,11 +489,12 @@ end subroutine read_variable_3d_int
 
 
 !> @brief Reads variable from netCDF dataset.
-subroutine read_variable_0d_real(ncid, name, buffer)
+subroutine read_variable_0d_real(ncid, name, buffer, start)
 
   integer, intent(in) :: ncid !< NetCDF id.
   character(len=*), intent(in) :: name !< Variable name.
   real(kind=wp), intent(inout) :: buffer
+  integer, dimension(:), intent(in), optional :: start !< Corner indices
 
   real(kind=wp) :: add
   integer :: err
@@ -484,7 +503,7 @@ subroutine read_variable_0d_real(ncid, name, buffer)
 
   err = nf90_inq_varid(ncid, trim(name), varid)
   call netcdf_catch(err)
-  err = nf90_get_var(ncid, varid, buffer)
+  err = nf90_get_var(ncid, varid, buffer, start)
   call netcdf_catch(err)
   err = nf90_get_att(ncid, varid, "scale_factor", scales)
   if (err .eq. nf90_enotatt) then
@@ -508,35 +527,35 @@ subroutine read_variable_1d_real(ncid, name, buffer, start, counts)
   integer, intent(in) :: ncid !< NetCDF id.
   character(len=*), intent(in) :: name !< Variable name.
   real(kind=wp), dimension(:), allocatable, intent(inout) :: buffer
-  integer, intent(in), optional :: start !< Corner indices
-  integer, intent(in), optional :: counts !< Edge lengths.
+  integer, dimension(:), intent(in), optional :: start !< Corner indices
+  integer, dimension(:), intent(in), optional :: counts !< Edge lengths.
 
   real(kind=wp) :: add
-  integer, dimension(1) :: dimids
+  integer, dimension(nf90_max_dims) :: dimids
   integer :: err
+  integer :: i
+  integer :: n
   real(kind=wp) :: scales
-  integer, dimension(1) :: sizes
-  integer, dimension(1) :: starts
+  integer, dimension(nf90_max_dims) :: sizes
   integer :: varid
 
   err = nf90_inq_varid(ncid, trim(name), varid)
   call netcdf_catch(err)
-  if (present(start)) then
-    starts(1) = start
-  else
-    starts(1) = 1
-  endif
+  err = nf90_inquire_variable(ncid, varid, ndims=n)
+  call netcdf_catch(err)
   if (present(counts)) then
-    sizes(1) = counts
+    sizes(:n) = counts(:n)
   else
     err = nf90_inquire_variable(ncid, varid, dimids=dimids)
     call netcdf_catch(err)
-    err = nf90_inquire_dimension(ncid, dimids(1), len=sizes(1))
-    call netcdf_catch(err)
+    do i = 1, n
+      err = nf90_inquire_dimension(ncid, dimids(i), len=sizes(i))
+      call netcdf_catch(err)
+    enddo
   endif
   if (allocated(buffer)) deallocate(buffer)
   allocate(buffer(sizes(1)))
-  err = nf90_get_var(ncid, varid, buffer, starts, sizes)
+  err = nf90_get_var(ncid, varid, buffer, start, sizes)
   call netcdf_catch(err)
   err = nf90_get_att(ncid, varid, "scale_factor", scales)
   if (err .eq. nf90_enotatt) then
@@ -560,25 +579,28 @@ subroutine read_variable_2d_real(ncid, name, buffer, start, counts)
   integer, intent(in) :: ncid !< NetCDF id.
   character(len=*), intent(in) :: name !< Variable name.
   real(kind=wp), dimension(:,:), allocatable, intent(inout) :: buffer
-  integer, dimension(2), intent(in), optional :: start !< Corner indices
-  integer, dimension(2), intent(in), optional :: counts !< Edge lengths.
+  integer, dimension(:), intent(in), optional :: start !< Corner indices
+  integer, dimension(:), intent(in), optional :: counts !< Edge lengths.
 
   real(kind=wp) :: add
-  integer, dimension(2) :: dimids
+  integer, dimension(nf90_max_dims) :: dimids
   integer :: err
   integer :: i
+  integer :: n
   real(kind=wp) :: scales
-  integer, dimension(2) :: sizes
+  integer, dimension(nf90_max_dims) :: sizes
   integer :: varid
 
   err = nf90_inq_varid(ncid, trim(name), varid)
   call netcdf_catch(err)
+  err = nf90_inquire_variable(ncid, varid, ndims=n)
+  call netcdf_catch(err)
   if (present(counts)) then
-    sizes(:) = counts(:)
+    sizes(:n) = counts(:n)
   else
     err = nf90_inquire_variable(ncid, varid, dimids=dimids)
     call netcdf_catch(err)
-    do i = 1, size(dimids)
+    do i = 1, n
       err = nf90_inquire_dimension(ncid, dimids(i), len=sizes(i))
       call netcdf_catch(err)
     enddo
@@ -609,25 +631,28 @@ subroutine read_variable_3d_real(ncid, name, buffer, start, counts)
   integer, intent(in) :: ncid !< NetCDF id.
   character(len=*), intent(in) :: name !< Variable name.
   real(kind=wp), dimension(:,:,:), allocatable, intent(inout) :: buffer
-  integer, dimension(3), intent(in), optional :: start !< Corner indices
-  integer, dimension(3), intent(in), optional :: counts !< Edge lengths.
+  integer, dimension(:), intent(in), optional :: start !< Corner indices
+  integer, dimension(:), intent(in), optional :: counts !< Edge lengths.
 
   real(kind=wp) :: add
-  integer, dimension(3) :: dimids
+  integer, dimension(nf90_max_dims) :: dimids
   integer :: err
   integer :: i
+  integer :: n
   real(kind=wp) :: scales
-  integer, dimension(3) :: sizes
+  integer, dimension(nf90_max_dims) :: sizes
   integer :: varid
 
   err = nf90_inq_varid(ncid, trim(name), varid)
   call netcdf_catch(err)
+  err = nf90_inquire_variable(ncid, varid, ndims=n)
+  call netcdf_catch(err)
   if (present(counts)) then
-    sizes(:) = counts(:)
+    sizes(:n) = counts(:n)
   else
     err = nf90_inquire_variable(ncid, varid, dimids=dimids)
     call netcdf_catch(err)
-    do i = 1, size(dimids)
+    do i = 1, n
       err = nf90_inquire_dimension(ncid, dimids(i), len=sizes(i))
       call netcdf_catch(err)
     enddo
@@ -658,25 +683,28 @@ subroutine read_variable_4d_real(ncid, name, buffer, start, counts)
   integer, intent(in) :: ncid !< NetCDF id.
   character(len=*), intent(in) :: name !< Variable name.
   real(kind=wp), dimension(:,:,:,:), allocatable, intent(inout) :: buffer
-  integer, dimension(4), intent(in), optional :: start !< Corner indices
-  integer, dimension(4), intent(in), optional :: counts !< Edge lengths.
+  integer, dimension(:), intent(in), optional :: start !< Corner indices
+  integer, dimension(:), intent(in), optional :: counts !< Edge lengths.
 
   real(kind=wp) :: add
-  integer, dimension(4) :: dimids
+  integer, dimension(nf90_max_dims) :: dimids
   integer :: err
   integer :: i
+  integer :: n
   real(kind=wp) :: scales
-  integer, dimension(4) :: sizes
+  integer, dimension(nf90_max_dims) :: sizes
   integer :: varid
 
   err = nf90_inq_varid(ncid, trim(name), varid)
   call netcdf_catch(err)
+  err = nf90_inquire_variable(ncid, varid, ndims=n)
+  call netcdf_catch(err)
   if (present(counts)) then
-    sizes(:) = counts(:)
+    sizes(:n) = counts(:n)
   else
     err = nf90_inquire_variable(ncid, varid, dimids=dimids)
     call netcdf_catch(err)
-    do i = 1, size(dimids)
+    do i = 1, n
       err = nf90_inquire_dimension(ncid, dimids(i), len=sizes(i))
       call netcdf_catch(err)
     enddo
@@ -707,24 +735,12 @@ subroutine write_variable_1d_real(ncid, varid, buffer, start, counts)
   integer, intent(in) :: ncid !< NetCDF id.
   integer, intent(in) :: varid !< Variable id.
   real(kind=wp), dimension(:), intent(in) :: buffer
-  integer, intent(in), optional :: start !< Corner indices
-  integer, intent(in), optional :: counts !< Edge lengths.
+  integer, dimension(:), intent(in), optional :: start !< Corner indices
+  integer, dimension(:), intent(in), optional :: counts !< Edge lengths.
 
   integer :: err
-  integer, dimension(1) :: sizes
-  integer, dimension(1) :: starts
 
-  if (present(start)) then
-    starts(1) = start
-  else
-    starts(1) = 1
-  endif
-  if (present(counts)) then
-    sizes(1) = counts
-  else
-    sizes(1) = 1
-  endif
-  err = nf90_put_var(ncid, varid, buffer, starts, sizes)
+  err = nf90_put_var(ncid, varid, buffer, start, counts)
   call netcdf_catch(err)
 end subroutine write_variable_1d_real
 
@@ -735,8 +751,8 @@ subroutine write_variable_2d_real(ncid, varid, buffer, start, counts)
   integer, intent(in) :: ncid !< NetCDF id.
   integer, intent(in) :: varid !< Variable id.
   real(kind=wp), dimension(:,:), intent(in) :: buffer
-  integer, dimension(2), intent(in), optional :: start !< Corner indices
-  integer, dimension(2), intent(in), optional :: counts !< Edge lengths.
+  integer, dimension(:), intent(in), optional :: start !< Corner indices
+  integer, dimension(:), intent(in), optional :: counts !< Edge lengths.
 
   integer :: err
 
@@ -751,8 +767,8 @@ subroutine write_variable_3d_real(ncid, varid, buffer, start, counts)
   integer, intent(in) :: ncid !< NetCDF id.
   integer, intent(in) :: varid !< Variable id.
   real(kind=wp), dimension(:,:,:), intent(in) :: buffer
-  integer, dimension(3), intent(in), optional :: start !< Corner indices
-  integer, dimension(3), intent(in), optional :: counts !< Edge lengths.
+  integer, dimension(:), intent(in), optional :: start !< Corner indices
+  integer, dimension(:), intent(in), optional :: counts !< Edge lengths.
 
   integer :: err
 
@@ -767,8 +783,8 @@ subroutine write_variable_4d_real(ncid, varid, buffer, start, counts)
   integer, intent(in) :: ncid !< NetCDF id.
   integer, intent(in) :: varid !< Variable id.
   real(kind=wp), dimension(:,:,:,:), intent(in) :: buffer
-  integer, dimension(4), intent(in), optional :: start !< Corner indices
-  integer, dimension(4), intent(in), optional :: counts !< Edge lengths.
+  integer, dimension(:), intent(in), optional :: start !< Corner indices
+  integer, dimension(:), intent(in), optional :: counts !< Edge lengths.
 
   integer :: err
 
@@ -783,8 +799,8 @@ subroutine read_variable_1d_int_to_bool(ncid, name, buffer, start, counts)
   integer, intent(in) :: ncid !< NetCDF id.
   character(len=*), intent(in) :: name !< Variable name.
   logical(wl), dimension(:), allocatable, intent(inout) :: buffer
-  integer, intent(in), optional :: start !< Corner indices
-  integer, intent(in), optional :: counts !< Edge lengths.
+  integer, dimension(:), intent(in), optional :: start !< Corner indices
+  integer, dimension(:), intent(in), optional :: counts !< Edge lengths.
 
   integer, dimension(:), allocatable :: buffer1d
   integer :: i
@@ -799,6 +815,7 @@ subroutine read_variable_1d_int_to_bool(ncid, name, buffer, start, counts)
       buffer(i) = .true.
     endif
   enddo
+  deallocate(buffer1d)
 end subroutine read_variable_1d_int_to_bool
 
 

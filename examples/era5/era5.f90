@@ -267,11 +267,11 @@ subroutine create_atmosphere(atm, parser)
 
   !Store axis data so it can be copied to the output file.
   start(1) = x_start; counts(1) = nlon;
-  call read_variable(ncid, "lon", atm%longitude, start(1), counts(1))
+  call read_variable(ncid, "lon", atm%longitude, start(1:1), counts(1:1))
   start(1) = y_start; counts(1) = nlat;
-  call read_variable(ncid, "lat", atm%latitude, start(1), counts(1))
+  call read_variable(ncid, "lat", atm%latitude, start(1:1), counts(1:1))
   start(1) = t_start; counts(1) = atm%num_times;
-  call read_variable(ncid, "time", atm%time, start(1), counts(1))
+  call read_variable(ncid, "time", atm%time, start(1:1), counts(1:1))
 
   !Determine mapping from columns to blocks.
   call get_argument(parser, "-b", buffer)
@@ -463,7 +463,7 @@ subroutine create_atmosphere(atm, parser)
       atm%molecules(atm%num_molecules) = molecules(i)%id
       read(buffer, *) year
       start(1) = int(year); counts(1) = 1
-      call read_variable(ncid, trim(molecules(i)%name), buffer1d, start(1), counts(1))
+      call read_variable(ncid, trim(molecules(i)%name), buffer1d, start(1:1), counts(1:1))
       atm%ppmv(:,:,:,:,atm%num_molecules) = buffer1d(1)*from_ppmv
     endif
   enddo

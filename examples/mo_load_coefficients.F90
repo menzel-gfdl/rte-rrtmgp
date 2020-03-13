@@ -75,39 +75,8 @@ subroutine load_and_init(kdist, filename, available_gases)
   real(wp), dimension(:,:), allocatable :: totplnk
   real(wp), dimension(:,:,:,:), allocatable :: planck_frac
   integer :: ncid
-  integer :: ntemps, &
-             npress, &
-             nabsorbers, &
-             nextabsorbers, &
-             nminorabsorbers, &
-             nmixingfracs, &
-             nlayers, &
-             nbnds, &
-             ngpts, &
-             npairs, &
-             nminor_absorber_intervals_lower, &
-             nminor_absorber_intervals_upper, &
-             ncontributors_lower, &
-             ncontributors_upper, &
-             ninternalSourcetemps
 
   ncid = open_dataset(fileName)
-! ntemps = dimension_length(ncid, "temperature")
-! npress = dimension_length(ncid, "pressure")
-  nabsorbers = dimension_length(ncid, "absorber")
-  nminorabsorbers = dimension_length(ncid, "minor_absorber")
-! nextabsorbers = dimension_length(ncid, "absorber_ext")
-! nmixingfracs = dimension_length(ncid, "mixing_fraction")
-! nlayers = dimension_length(ncid, "atmos_layer")
-! nbnds = dimension_length(ncid, "bnd")
-! ngpts = dimension_length(ncid, "gpt")
-! npairs = dimension_length(ncid, "pair")
-  nminor_absorber_intervals_lower = dimension_length(ncid, "minor_absorber_intervals_lower")
-  nminor_absorber_intervals_upper = dimension_length(ncid, "minor_absorber_intervals_upper")
-! ninternalSourcetemps = dimension_length(ncid, "temperature_Planck")
-! ncontributors_lower = dimension_length(ncid, "contributors_lower")
-! ncontributors_upper = dimension_length(ncid, "contributors_upper")
-
   call read_variable(ncid, "gas_names", gas_names)
   call read_variable(ncid, "key_species",  key_species)
   call read_variable(ncid, "bnd_limits_wavenumber", band_lims)

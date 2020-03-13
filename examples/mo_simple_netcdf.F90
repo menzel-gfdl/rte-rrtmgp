@@ -308,7 +308,7 @@ contains
     character(len=*), intent(in) :: dimName
     integer,          intent(in) :: dimLength
 
-    integer                 :: i, dimid
+    integer                 :: dimid
 
     if(dim_exists(ncid, dimName)) then
       if (dimLength /= get_dim_size(ncid, trim(dimName))) &

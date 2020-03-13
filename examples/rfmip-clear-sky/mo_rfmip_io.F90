@@ -76,7 +76,6 @@ contains
     ! ---------------------------
     integer :: ncid
     integer :: b, nblocks
-    real(wp), dimension(:,:  ), allocatable :: temp2d
     real(wp), dimension(:,:,:), allocatable :: temp3d
     ! ---------------------------
     if(any([ncol_l, nlay_l, nexp_l]  == 0)) call stop_on_err("read_and_block_pt: Haven't read problem size yet.")

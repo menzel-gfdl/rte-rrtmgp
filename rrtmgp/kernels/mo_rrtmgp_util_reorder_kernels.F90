@@ -18,8 +18,7 @@ module mo_rrtmgp_util_reorder_kernels
   implicit none
 contains
   ! ----------------------------------------------------------------------------
-  subroutine reorder_123x312_kernel(d1, d2, d3, array_in, array_out) &
-      bind(C, name = "reorder_123x312_kernel")
+  subroutine reorder_123x312_kernel(d1, d2, d3, array_in, array_out)
     integer,                         intent( in) :: d1, d2, d3
     real(wp), dimension(d1, d2, d3), intent( in) :: array_in
     real(wp), dimension(d3, d1, d2), intent(out) :: array_out
@@ -62,13 +61,12 @@ contains
 
   end subroutine reorder_123x312_kernel
   ! ----------------------------------------------------------------------------
-  subroutine reorder_123x321_kernel(d1, d2, d3, array_in, array_out) &
-      bind(C, name="reorder_123x321_kernel")
+  subroutine reorder_123x321_kernel(d1, d2, d3, array_in, array_out)
     integer,                         intent( in) :: d1, d2, d3
     real(wp), dimension(d1, d2, d3), intent( in) :: array_in
     real(wp), dimension(d3, d2, d1), intent(out) :: array_out
 
-    integer :: i1, i2, i3, i10, i30, i1diff, i3diff, idiff
+    integer :: i1, i2, i3, i10, i30, i1diff, i3diff
     integer, parameter :: tile = 32
 
     ! See the comment above

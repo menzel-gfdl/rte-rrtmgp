@@ -610,7 +610,7 @@ contains
     integer  :: icol, ilay, ibnd
     integer  :: index
     real(wp) :: fint
-    real(wp) :: t, ts, tsg  ! tau, tau*ssa, tau*ssa*g
+    real(wp) :: t, ts ! tau, tau*ssa, tau*ssa*g
     ! ---------------------------
     !$acc parallel loop gang vector default(present) collapse(3)
     do ibnd = 1, nbnd
@@ -663,7 +663,7 @@ contains
                                     intent(in) :: coeffs_asy
     real(wp), dimension(ncol,nlay,nbnd)        :: tau, taussa, taussag
     ! ---------------------------
-    integer  :: icol, ilay, ibnd, irad, count
+    integer  :: icol, ilay, ibnd, irad
     real(wp) :: t, ts
 
     !$acc parallel loop gang vector default(present) collapse(3)

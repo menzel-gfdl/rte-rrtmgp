@@ -806,7 +806,7 @@ contains
     class(ty_optical_props_arry), intent(inout) :: op_io
     character(128)                              :: err_message
     ! -----
-    integer :: ncol, nlay, ngpt, nmom
+    integer :: ncol, nlay, ngpt
     ! -----
     err_message = ""
     if(.not. op_in%bands_are_equal(op_io)) then

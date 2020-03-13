@@ -87,7 +87,7 @@ program rte_rrtmgp_clouds
   !
   type(ty_gas_optics_rrtmgp) :: k_dist
   type(ty_cloud_optics)      :: cloud_optics
-  type(ty_gas_concs)         :: gas_concs, gas_concs_garand, gas_concs_1col
+  type(ty_gas_concs)         :: gas_concs, gas_concs_garand
   class(ty_optical_props_arry), &
                  allocatable :: atmos, clouds
   type(ty_fluxes_broadband)  :: fluxes
@@ -98,7 +98,7 @@ program rte_rrtmgp_clouds
   logical :: top_at_1, is_sw, is_lw
 
   integer  :: ncol, nlay, nbnd, ngpt
-  integer  :: icol, ilay, ibnd, iloop, igas
+  integer  :: icol, ilay, iloop, igas
   real(wp) :: rel_val, rei_val
 
   character(len=8) :: char_input
@@ -113,7 +113,9 @@ program rte_rrtmgp_clouds
   ! Timing variables
   !
   integer(kind=8)              :: start, finish, start_all, finish_all, clock_rate
+#ifdef _OPENACC
   real(wp)                     :: avg
+#endif
   integer(kind=8), allocatable :: elapsed(:)
   !$omp threadprivate( lw_sources, toa_flux, flux_up, flux_dn, flux_dir )
   ! ----------------------------------------------------------------------------------

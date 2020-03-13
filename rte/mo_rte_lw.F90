@@ -77,7 +77,6 @@ contains
     !
     integer :: ncol, nlay, ngpt, nband
     integer :: n_quad_angs
-    integer :: icol, iband, igpt
     real(wp), dimension(:,:,:), allocatable :: gpt_flux_up, gpt_flux_dn
     real(wp), dimension(:,:),   allocatable :: sfc_emis_gpt
     ! --------------------------------------------------

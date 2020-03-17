@@ -104,7 +104,7 @@ elemental pure subroutine optics(self, water_concentration, equivalent_radius, &
   class(HuStamnes), intent(in) :: self
   real(kind=wp), intent(in) :: water_concentration !< Water concentration [g m-3].
   real(kind=wp), intent(in) :: equivalent_radius !< Particle equivalent radius [micron].
-  type(OpticalProperties), intent(inout) :: optical_properties !< Optical properties.
+  type(OpticalProperties), intent(inout) :: optical_properties
 
   integer :: i
 
@@ -126,11 +126,11 @@ elemental pure subroutine optics_(self, water_concentration, equivalent_radius, 
   real(kind=wp), intent(in) :: water_concentration !< Water concentration [g m-3].
   real(kind=wp), intent(in) :: equivalent_radius !< Droplet equivalent radius [micron].
   integer, intent(in) :: band !< Band index.
-  real(kind=wp), intent(out) :: extinction_coefficient !< Extinction coefficient [cm-1] (grid).
-  real(kind=wp), intent(out) :: single_scatter_albedo !< Single-scatter albedo (grid).
-  real(kind=wp), intent(out) :: asymmetry_factor !< Asymmetry factor (grid).
+  real(kind=wp), intent(out) :: extinction_coefficient !< Extinction coefficient [m-1].
+  real(kind=wp), intent(out) :: single_scatter_albedo !< Single-scatter albedo.
+  real(kind=wp), intent(out) :: asymmetry_factor !< Asymmetry factor.
 
-  real(kind=wp), parameter :: cm_to_km = 1.e-5
+  real(kind=wp), parameter :: m_to_km = 1.e-3
   integer :: i
   real(kind=wp) :: r
 
@@ -141,7 +141,7 @@ elemental pure subroutine optics_(self, water_concentration, equivalent_radius, 
     endif
   enddo
   i = i - 1
-  extinction_coefficient = water_concentration*cm_to_km*(self%a1(band,i)* &
+  extinction_coefficient = water_concentration*m_to_km*(self%a1(band,i)* &
                            (r**self%b1(band,i)) + self%c1(band,i)) !Equation 13.
   single_scatter_albedo = 1. - (self%a2(band,i)*(r**self%b2(band,i)) + self%c2(band,i)) !Equation 14.
   asymmetry_factor = self%a3(band,i)*(r**self%b3(band,i)) + self%c3(band,i) !Equation 15.

@@ -498,16 +498,22 @@ subroutine create_atmosphere(atm, parser)
 
     !Calculate total air density.
     allocate(air_density(block_size, atm%num_layers, num_blocks, atm%num_times))
-    air_density = (xh2o(:,:,:,:)*atm%layer_pressure(:,:,:,:))/ &
-                  (r_h2o*atm%layer_temperature(:,:,:,:)) + &
-                  ((1._wp - xh2o(:,:,:,:))*atm%layer_pressure)/ &
-                  (r_dry_air*atm%layer_temperature(:,:,:,:))
+!   air_density = (xh2o(:,:,:,:)*atm%layer_pressure(:,:,:,:))/ &
+!                 (r_h2o*atm%layer_temperature(:,:,:,:)) + &
+!                 ((1._wp - xh2o(:,:,:,:))*atm%layer_pressure)/ &
+!                 (r_dry_air*atm%layer_temperature(:,:,:,:))
+    air_density(:,:,:,:) = (atm%layer_pressure(:,:,:,:)*(29.9647/1000.))/ &
+                           (atm%layer_temperature(:,:,:,:)*8.314462)
 
     !Calculate layer thickness.
     allocate(atm%layer_thickness(block_size, atm%num_layers, num_blocks, atm%num_times))
-    atm%layer_thickness(:,:,:,:) = abs(atm%level_pressure(:,2:,:,:) - &
-                                   atm%level_pressure(:,:atm%num_layers,:,:))/ &
-                                   (air_density(:,:,:,:)*9.81)
+!   atm%layer_thickness(:,:,:,:) = abs(atm%level_pressure(:,2:,:,:) - &
+!                                  atm%level_pressure(:,:atm%num_layers,:,:))/ &
+!                                  (air_density(:,:,:,:)*9.81)
+    atm%layer_thickness(:,:,:,:) = &
+      (abs(log(atm%level_pressure(:,:atm%num_layers,:,:)) - &
+      log(atm%level_pressure(:,2:,:,:)))* &
+      atm%layer_temperature(:,:,:,:)*8.314462)/((29.9647/1000.)*9.81)
 
     !Read in and calculate cloud inputs.
     ncid = open_dataset(buffer)
@@ -519,11 +525,19 @@ subroutine create_atmosphere(atm, parser)
     call read_variable(ncid, "ciwc", buffer4d, start, counts)
     allocate(atm%cloud_ice_content(block_size, atm%num_layers, num_blocks, atm%num_times))
     call xyzt_to_bznt(atm%cloud_ice_content, buffer4d)
-    atm%cloud_ice_content(:,:,:,:) = air_density(:,:,:,:)*atm%cloud_ice_content(:,:,:,:)*kg_to_g
+    where (atm%cloud_fraction .gt. 0.)
+      atm%cloud_ice_content(:,:,:,:) = air_density(:,:,:,:)*atm%cloud_ice_content(:,:,:,:)*kg_to_g
+    elsewhere
+      atm%cloud_ice_content(:,:,:,:) = 0.
+    endwhere
     call read_variable(ncid, "clwc", buffer4d, start, counts)
     allocate(atm%cloud_liquid_content(block_size, atm%num_layers, num_blocks, atm%num_times))
     call xyzt_to_bznt(atm%cloud_liquid_content, buffer4d)
-    atm%cloud_liquid_content(:,:,:,:) = air_density(:,:,:,:)*atm%cloud_liquid_content(:,:,:,:)*kg_to_g
+    where (atm%cloud_fraction .gt. 0.)
+      atm%cloud_liquid_content(:,:,:,:) = air_density(:,:,:,:)*atm%cloud_liquid_content(:,:,:,:)*kg_to_g
+    elsewhere
+      atm%cloud_liquid_content(:,:,:,:) = 0.
+    endwhere
     deallocate(air_density)
     call close_dataset(ncid)
   endif

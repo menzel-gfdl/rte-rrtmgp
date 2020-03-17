@@ -94,7 +94,7 @@ elemental pure subroutine optics_(self, ice_concentration, equivalent_radius, ba
   real(kind=wp), intent(in) :: ice_concentration !< Ice concentration [g m-3].
   real(kind=wp), intent(in) :: equivalent_radius !< Particle equivalent radius [micron].
   integer, intent(in) :: band !< Band index.
-  real(kind=wp), intent(out) :: extinction_coefficient !< Extinction coefficient [cm-1].
+  real(kind=wp), intent(out) :: extinction_coefficient !< Extinction coefficient [m-1].
   real(kind=wp), intent(out) :: single_scatter_albedo !< Single-scatter albedo.
   real(kind=wp), intent(out) :: asymmetry_factor !< Asymmetry factor.
 

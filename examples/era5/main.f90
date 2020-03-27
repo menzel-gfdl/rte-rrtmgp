@@ -419,9 +419,9 @@ do t = 1, atm%num_times
                                                   cloud_liquid_optics(m))
               !Convert from parameterization bands to RRTMGP bands.
               call cloud_liquid_optics(m)%thick_average(lw_cloud_liquid_optics_rrtmgp(m), &
-                                                        ending_band=ice_parameterization%last_ir_band)
+                                                        ending_band=liquid_parameterization%last_ir_band)
               call cloud_liquid_optics(m)%thick_average(sw_cloud_liquid_optics_rrtmgp(m), &
-                                                        starting_band=ice_parameterization%last_ir_band+1)
+                                                        starting_band=liquid_parameterization%last_ir_band+1)
             else
               lw_cloud_liquid_optics_rrtmgp(m)%extinction_coefficient(:) = 0.
               lw_cloud_liquid_optics_rrtmgp(m)%single_scatter_albedo(:) = 0.

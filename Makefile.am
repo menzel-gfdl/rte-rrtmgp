@@ -151,13 +151,15 @@ $(allsky)/mo_load_cloud_coefficients.$(OBJEXT): $(top_srcdir)/examples/mo_simple
 rfmip_fdh_SOURCES = $(rfmip_clearsky)/stratospheric_adjustment.F90 \
                     $(rfmip_clearsky)/mo_rfmip_io.F90 \
                     $(top_srcdir)/examples/mo_load_coefficients.F90 \
-                    $(top_srcdir)/examples/mo_simple_netcdf.F90
+                    $(top_srcdir)/examples/mo_simple_netcdf.F90 \
+                    $(era5)/argparse.f90
 rfmip_fdh_LDADD = $(top_builddir)/librte.la \
                   $(top_builddir)/librrtmgp.la \
                   $(top_builddir)/libclouds.la \
                   -lnetcdff
 $(rfmip_clearsky)/stratospheric_adjustment.$(OBJEXT): $(rfmip_clearsky)/mo_rfmip_io.$(OBJEXT) \
-                                                      $(top_srcdir)/examples/mo_load_coefficients.$(OBJEXT)
+                                                      $(top_srcdir)/examples/mo_load_coefficients.$(OBJEXT) \
+                                                      $(era5)/argparse.$(OBJEXT)
 
 
 CLEANFILES = *.mod

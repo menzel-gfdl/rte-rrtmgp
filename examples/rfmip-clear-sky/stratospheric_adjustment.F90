@@ -129,8 +129,9 @@ call add_argument(parser, "sw_kdist", "Shortwave k-distribution file.")
 call add_argument(parser, "-n", "Number of iterations (default = 10).", requires_val=.true.)
 call add_argument(parser, "-o", "Output file (default = dynamic_adjustments.nc).", &
                   requires_val=.true.)
+call add_argument(parser, "-s", "Stratospheric layer cutoff index (default = 30).", &
+                  requires_val=.true.)
 call parse_args(parser)
-
 
 call get_argument(parser, "rfmip", buffer)
 rfmip_file = trim(buffer)
@@ -157,35 +158,22 @@ call read_and_block_lw_bc(rfmip_file, ncol, sfc_emis, sfc_t)
 call read_and_block_sw_bc(rfmip_file, ncol, surface_albedo, &
                           total_solar_irradiance, solar_zenith_angle)
 
-
 !Find pressure layer indices for the stratosphere.
+call get_argument(parser, "-s", buffer)
+if (trim(buffer) .eq. "not present") then
+  i = 30
+else
+  read(buffer, "(i)") i
+endif
 allocate(stratosphere_starting_index(ncol, nexp))
 allocate(stratosphere_ending_index(ncol, nexp))
 if (top_at_1) then
   stratosphere_starting_index(:,:) = 1
+  stratosphere_ending_index(:,:) = i
 else
+  stratosphere_starting_index(:,:) = i
   stratosphere_ending_index(:,:) = nlay
 endif
-do k = 1, nexp
-  do i = 1, ncol
-    do j = 1, nlay
-      if (top_at_1) then
-        if (p_lay(i,j,k) .gt. stratosphere_max_pressure) then
-          !Leaving the stratosphere during downward sweep through the layers.
-          stratosphere_ending_index(i,k) = j - 1
-          exit
-        endif
-      else
-        if (p_lay(i,j,k) .lt. stratosphere_max_pressure) then
-          !Entering the stratosphere during upward sweep through the layers.
-          stratosphere_starting_index(i,k) = j - 1
-          exit
-        endif
-      endif
-    enddo
-  enddo
-enddo
-
 
 !Initialize longwave.
 call get_argument(parser, "lw_kdist", buffer)
@@ -212,7 +200,6 @@ call stop_on_err(lw_optical_props%alloc_1scl(ncol, nlay, lw_k_dist))
 nbnd = lw_k_dist%get_nband()
 allocate(sfc_emis_spec(nbnd, ncol))
 allocate(lw_heating_rate(ncol, nlay, nexp))
-
 
 !Initialize shortwave.
 call get_argument(parser, "sw_kdist", buffer)
@@ -250,7 +237,7 @@ allocate(sw_heating_rate(ncol, nlay, nexp))
 
 !Create output files
 call get_argument(parser, "-o", buffer)
-if (buffer .eq. "not present") then
+if (trim(buffer) .eq. "not present") then
   output_file = "dynamic_adjustment"
 else
   output_file = trim(buffer)
@@ -292,7 +279,7 @@ call catch_netcdf_error(nf90_close(output(1)%ncid))
 allocate(dynamic_heating_rate(ncol, nlay))
 dynamic_heating_rate(:,:) = 0._wp
 do i = 1, ncol
-  do j = stratosphere_starting_index(j,1), stratosphere_ending_index(j,1)
+  do j = stratosphere_starting_index(i,1), stratosphere_ending_index(i,1)
     dynamic_heating_rate(i,j) = -1._wp*(lw_heating_rate(i,j,1) + sw_heating_rate(i,j,1))
   enddo
 enddo

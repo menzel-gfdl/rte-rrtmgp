@@ -275,7 +275,8 @@ contains
     !
     !   output extents
     !
-    if(any([sources%get_ncol(), sources%get_nlay(), sources%get_ngpt()] /= [ncol, nlay, ngpt])) &
+    if(sources%get_ncol() .ne. ncol .or. sources%get_nlay() .ne. nlay .or. &
+       sources%get_ngpt() .ne. ngpt) &
       error_msg = "gas_optics%gas_optics: source function arrays inconsistently sized"
     if(error_msg  /= '') return
 

@@ -118,8 +118,26 @@ elemental pure subroutine thick_average(self, optics, starting_band, ending_band
       if (self%bands(k) .gt. optics%bands(j)) exit
     enddo
     c = k
-    if (k .eq. a) k = a + 1
-    if (k .eq. b + 1) k = b
+    if (k .eq. a) then
+      if (optics%bands(j) .le. self%bands(k)) then
+        !Inside the first band, but left of the band center.
+        optics%extinction_coefficient(j) = self%extinction_coefficient(k)
+        optics%single_scatter_albedo(j) = self%single_scatter_albedo(k)
+        optics%asymmetry_factor(j) = self%asymmetry_factor(k)
+        cycle
+      endif
+      k = a + 1
+    endif
+    if (k .eq. b + 1) then
+      k = b
+      if (optics%bands(j) .ge. self%bands(k)) then
+        !Inside the last band, but right of the band center.
+        optics%extinction_coefficient(j) = self%extinction_coefficient(k)
+        optics%single_scatter_albedo(j) = self%single_scatter_albedo(k)
+        optics%asymmetry_factor(j) = self%asymmetry_factor(k)
+        cycle
+      endif
+    endif
     optics%extinction_coefficient(j) = interp(self%bands(k-1:k), &
                                               self%extinction_coefficient(k-1:k), &
                                               optics%bands(j))

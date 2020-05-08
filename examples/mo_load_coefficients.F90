@@ -247,10 +247,10 @@ contains
       allocate(solar_facular(ngpts))
       call read_data(dataset, "solar_source_facular", solar_facular)
       allocate(solar_sunspot(ngpts))
-      call read_field(dataset, "solar_source_sunspot", solar_sunspot)
-      call read_field(dataset, "tsi_default", tsi_default)
-      call read_field(dataset, "mg_default", mg_default)
-      call read_field(dataset, "sb_default", sb_default)
+      call read_data(dataset, "solar_source_sunspot", solar_sunspot)
+      call read_data(dataset, "tsi_default", tsi_default)
+      call read_data(dataset, "mg_default", mg_default)
+      call read_data(dataset, "sb_default", sb_default)
       call stop_on_err(kdist%load(available_gases, &
                                   gas_names,   &
                                   key_species, &

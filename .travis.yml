@@ -12,6 +12,7 @@ addons:
 before_script:
   - git clone https://github.com/NOAA-GFDL/FMS.git
   - cd FMS
+  - git checkout 2020.02
   - autoreconf -i
   - ./configure CC=mpicc CPPFLAGS="-I/usr/include -Duse_LARGEFILE" FC=mpif90 FCFLAGs="-I/usr/include -Duse_LARGEFILE" LDFLAGS="-L/usr/lib" --prefix=$PWD/../local
   - make

@@ -123,10 +123,8 @@ contains
                             nminor_absorber_intervals_lower)
     call get_dimension_size(dataset, "minor_absorber_intervals_upper", &
                             nminor_absorber_intervals_upper)
-    call get_dimension_size(dataset, "temperature_Planck", ninternalSourcetemps)
     call get_dimension_size(dataset, "contributors_lower", ncontributors_lower)
     call get_dimension_size(dataset, "contributors_upper", ncontributors_upper)
-    call get_dimension_size(dataset, "fit_coeffs", nfit_coeffs) ! Will be 0 for SW
 
     ! -----------------
     !
@@ -207,6 +205,8 @@ contains
       !
       ! If there's a totplnk variable in the file it's a longwave (internal sources) type
       !
+      call get_dimension_size(dataset, "temperature_Planck", ninternalSourcetemps)
+      call get_dimension_size(dataset, "fit_coeffs", nfit_coeffs)
       allocate(totplnk(ninternalsourcetemps, nbnds))
       call read_data(dataset, "totplnk", totplnk)
       allocate(planck_frac(ngpts, nmixingfracs, npress+1, ntemps))

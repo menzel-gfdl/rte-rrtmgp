@@ -7,6 +7,7 @@ use netcdf_utils
 use mo_rte_kind, only: wp
 
 use argparse
+use zenith_mod, only: gauss
 implicit none
 private
 
@@ -25,6 +26,7 @@ type, public :: Atmosphere_t
   real(kind=wp), dimension(:,:,:,:), allocatable :: level_temperature !< Temperature [K] (block_size, level, num_blocks, time).
   real(kind=wp), dimension(:), allocatable :: longitude !< Longitude [degrees].
   integer, dimension(:), allocatable :: molecules !< Molecule ids (molecule).
+  logical :: monthly !< Flag for monthly-mean data.
   integer :: num_columns !< Number of columns.
   integer :: num_layers !< Number of layers.
   integer :: num_levels !< Number of levels.
@@ -39,8 +41,10 @@ type, public :: Atmosphere_t
   real(kind=wp), dimension(:,:,:), allocatable :: surface_albedo_direct_ir !< Surface albedo for infrared direct beam (block_size, num_blocks, time).
   real(kind=wp), dimension(:,:,:), allocatable :: surface_albedo_direct_uv !< Surface albedo for ultraviolet direct beam (block_size, num_blocks, time).
   real(kind=wp), dimension(:,:,:), allocatable :: surface_temperature !< Surface temperature [K] (block_size, num_blocks, time).
-  real(kind=wp), dimension(:), allocatable :: time !< Time [hours].
+  real(kind=wp), dimension(:), allocatable :: time !< Time [hours or months].
   real(kind=wp), dimension(:), allocatable :: total_solar_irradiance !< Total solar irradiance [W m-2] (time).
+  real(kind=wp), dimension(:,:,:,:), allocatable :: zenith_angle !< Cosine of approximate zenith angles [degrees] (3, block_size, num_blocks, time).
+  real(kind=wp), dimension(:,:,:,:), allocatable :: zenith_weight !< Approximate zenith angle weights (3, block_size, num_blocks, time).
 end type Atmosphere_t
 
 
@@ -174,6 +178,7 @@ subroutine create_atmosphere(atm, parser)
   end type MoleculeMeta_t
 
   real(kind=wp), dimension(:,:,:,:), allocatable :: air_density
+  real(kind=wp), dimension(:,:), allocatable :: blocked_latitude
   character(len=valuelen) :: buffer
   real(kind=wp), dimension(:), allocatable :: buffer1d
   real(kind=wp), dimension(:,:,:), allocatable :: buffer3d
@@ -192,7 +197,10 @@ subroutine create_atmosphere(atm, parser)
   real(kind=wp), dimension(:,:,:,:), allocatable :: level_temperature
   real(kind=wp), parameter :: mb_to_pa = 100._wp ![Pa mb-1].
   real(kind=wp) :: mean_irradiance
+  integer, dimension(:), allocatable :: mid_month
   type(MoleculeMeta_t), dimension(num_molecules) :: molecules
+  integer, dimension(12), parameter :: month_lengths = (/31, 28, 31, 30, 31, 30, 31, 31, &
+                                                         30, 31, 30, 31/)
   integer :: ncid
   real(kind=wp), parameter :: ozone_mass = 47.997_wp
   real(kind=wp), parameter :: pi = 3.14159265359_wp
@@ -234,6 +242,8 @@ subroutine create_atmosphere(atm, parser)
   call add_argument(parser, "-CO2", "Year for CO2 abundance.", .true.)
   call add_argument(parser, "-HCFC-22", "Year for HCFC-22 abundance.", .true.)
   call add_argument(parser, "-H2O", "Include H2O.", .false.)
+  call add_argument(parser, "-monthly", "Use 3 zenith angle approximation for monthly data.", &
+                    .false.)
   call add_argument(parser, "-N2O", "Year for N2O abundance.", .true.)
   call add_argument(parser, "-O2", "O2 abundance [ppmv].", .true.)
   call add_argument(parser, "-O3", "Include O3.", .false.)
@@ -250,6 +260,10 @@ subroutine create_atmosphere(atm, parser)
   !Open the single file.
   call get_argument(parser, "single_file", buffer)
   ncid = open_dataset(buffer)
+
+  !Determine if the data is monthly.
+  call get_argument(parser, "-monthly", buffer)
+  atm%monthly = trim(buffer) .ne. "not present"
 
   !Determine the number of times.
   t_start = input_index(parser, "-t", 1)
@@ -286,6 +300,48 @@ subroutine create_atmosphere(atm, parser)
   endif
   num_blocks = atm%num_columns/block_size
 
+  if (atm%monthly) then
+    !Calculate the integer Julian day number for the middle of each month.
+    allocate(mid_month(atm%num_times))
+    do i = 1, atm%num_times
+      mid_month(i) = month_lengths(i)/2
+      if (t_start .gt. 1) then
+        mid_month(i) = mid_month(i) + sum(month_lengths(1:(t_start + i - 2)))
+      endif
+    enddo
+
+    !Block the latitude values.
+    allocate(blocked_latitude(block_size, num_blocks))
+    do i = 1, num_blocks
+      do j = 1, block_size
+        k = ((i - 1)*block_size + j)
+        if (mod(k, nlon) .eq. 0) then
+          k = k/nlon
+        else
+          k = k/nlon + 1
+        endif
+        blocked_latitude(j,i) = atm%latitude(k)
+      enddo
+    enddo
+
+    !Calculate solar zenith angles and weigths.
+    allocate(atm%zenith_angle(3, block_size, num_blocks, atm%num_times))
+    allocate(atm%zenith_weight(3, block_size, num_blocks, atm%num_times))
+    do i = 1, atm%num_times
+      do j = 1, num_blocks
+        do k = 1, block_size
+          call gauss(mid_month(i), blocked_latitude(k,j), atm%zenith_weight(:,k,j,i), &
+                     atm%zenith_angle(:,k,j,i))
+          where(atm%zenith_angle(:,k,j,i) .lt. 0.)
+            atm%zenith_angle(:,k,j,i) = 0.
+          endwhere
+        enddo
+      enddo
+    enddo
+    deallocate(mid_month)
+    deallocate(blocked_latitude)
+  endif
+
   !Surface temperature.
   start(1) = x_start; start(2) = y_start; start(3) = t_start;
   counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_times;
@@ -303,7 +359,11 @@ subroutine create_atmosphere(atm, parser)
   start(1) = 1; start(2) = 1; start(3) = t_start;
   counts(1) = global_nlon; counts(2) = global_nlat; counts(3) = atm%num_times;
   call read_variable(ncid, "tisr", buffer3d, start(1:3), counts(1:3))
-  buffer3d(:,:,:) = buffer3d(:,:,:)/seconds_per_hour
+  if (atm%monthly) then
+    buffer3d(:,:,:) = buffer3d(:,:,:)/(24.*seconds_per_hour)
+  else
+    buffer3d(:,:,:) = buffer3d(:,:,:)/seconds_per_hour
+  endif
   allocate(atm%total_solar_irradiance(atm%num_times))
   do i = 1, atm%num_times
     mean_irradiance = 0._wp
@@ -313,17 +373,19 @@ subroutine create_atmosphere(atm, parser)
     atm%total_solar_irradiance(i) = 4._wp*mean_irradiance/(global_nlon*total_weight)
   enddo
   deallocate(weights)
-  allocate(zenith(nlon, nlat, atm%num_times))
-  do k = 1, atm%num_times
-    do j = 1, nlat
-      do i = 1, nlon
-        zenith(i,j,k) = buffer3d(i+x_start-1,j+y_start-1,k)/atm%total_solar_irradiance(k)
+  if (.not. atm%monthly) then
+    allocate(zenith(nlon, nlat, atm%num_times))
+    do k = 1, atm%num_times
+      do j = 1, nlat
+        do i = 1, nlon
+          zenith(i,j,k) = buffer3d(i+x_start-1,j+y_start-1,k)/atm%total_solar_irradiance(k)
+        enddo
       enddo
     enddo
-  enddo
-  allocate(atm%solar_zenith_angle(block_size, num_blocks, atm%num_times))
-  call xyt_to_bnt(atm%solar_zenith_angle, zenith)
-  deallocate(zenith)
+    allocate(atm%solar_zenith_angle(block_size, num_blocks, atm%num_times))
+    call xyt_to_bnt(atm%solar_zenith_angle, zenith)
+    deallocate(zenith)
+  endif
 
   !Albedos.
   start(1) = x_start; start(2) = y_start; start(3) = t_start;
@@ -576,6 +638,8 @@ subroutine destroy_atmosphere(atm)
   if (allocated(atm%surface_temperature)) deallocate(atm%surface_temperature)
   if (allocated(atm%time)) deallocate(atm%time)
   if (allocated(atm%total_solar_irradiance)) deallocate(atm%total_solar_irradiance)
+  if (allocated(atm%zenith_angle)) deallocate(atm%zenith_angle)
+  if (allocated(atm%zenith_weight)) deallocate(atm%zenith_weight)
 end subroutine destroy_atmosphere
 
 

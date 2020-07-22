@@ -90,13 +90,15 @@ $(clouds)/stochastic_clouds.lo: $(clouds)/incomplete_beta.lo
 era5 = $(top_srcdir)/examples/era5
 era5_SOURCES = $(era5)/argparse.f90 \
                $(era5)/era5.f90 \
+               $(era5)/zenith.f90 \
                $(era5)/main.f90 \
                $(top_srcdir)/examples/mo_load_coefficients.F90
 era5_LDADD = $(top_builddir)/librte.la \
              $(top_builddir)/librrtmgp.la \
              $(top_builddir)/libclouds.la \
              -lnetcdff
-$(era5)/era5.$(OBJEXT): $(era5)/argparse.$(OBJEXT)
+$(era5)/era5.$(OBJEXT): $(era5)/argparse.$(OBJEXT) \
+                        $(era5)/zenith.$(OBJEXT)
 $(era5)/main.$(OBJEXT): $(era5)/era5.$(OBJEXT) \
                         $(era5)/argparse.$(OBJEXT) \
                         $(top_srcdir)/examples/mo_load_coefficients.$(OBJEXT)

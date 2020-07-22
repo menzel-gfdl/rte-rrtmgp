@@ -101,6 +101,7 @@ real(kind=wp) :: input_emissivity
 type(ty_fluxes_broadband) :: lw_fluxes
 real(kind=wp), parameter :: min_cos_zenith = tiny(min_cos_zenith)
 type(ty_fluxes_broadband) :: sw_fluxes
+type(ty_fluxes_broadband) :: fluxes
 real(kind=wp), dimension(:), allocatable :: total_irradiance
 real(kind=wp), dimension(:), allocatable :: zenith
 
@@ -326,6 +327,10 @@ allocate(lw_fluxes%flux_dn(block_size, atm%num_levels))
 allocate(lw_fluxes%flux_up(block_size, atm%num_levels))
 allocate(sw_fluxes%flux_dn(block_size, atm%num_levels))
 allocate(sw_fluxes%flux_up(block_size, atm%num_levels))
+if (atm%monthly) then
+  allocate(fluxes%flux_dn(block_size, atm%num_levels))
+  allocate(fluxes%flux_up(block_size, atm%num_levels))
+endif
 
 !Create output file.
 call get_argument(parser, "-o", buffer)
@@ -353,14 +358,16 @@ do t = 1, atm%num_times
     error = sw_k%gas_optics(atm%layer_pressure(:,:,i,t), atm%level_pressure(:,:,i,t), &
                             atm%layer_temperature(:,:,i,t), ppmv, sw_optics, toa)
     call catch(error)
-    do j = 1, block_size
-      !Avoid columns with large zenith angles because RTE will crash.
-      if (atm%solar_zenith_angle(j,i,t) .gt. min_cos_zenith) then
-        zenith(j) = atm%solar_zenith_angle(j,i,t)
-      else
-        zenith(j) = 1._wp
-      endif
-    enddo
+    if (.not. atm%monthly) then
+      do j = 1, block_size
+        !Avoid columns with large zenith angles because RTE will crash.
+        if (atm%solar_zenith_angle(j,i,t) .gt. min_cos_zenith) then
+          zenith(j) = atm%solar_zenith_angle(j,i,t)
+        else
+          zenith(j) = 1._wp
+        endif
+      enddo
+    endif
     total_irradiance(:) = sum(toa, dim=2)
     do j = 1, num_sw_gpoints
       toa(:,j) = toa(:,j)*atm%total_solar_irradiance(t)/total_irradiance(:)
@@ -394,8 +401,24 @@ do t = 1, atm%num_times
       !Clear-sky fluxes.
       error = rte_lw(lw_optics, .true., source, emissivity, lw_fluxes, n_gauss_angles=1)
       call catch(error)
-      error = rte_sw(sw_optics, .true., zenith, toa, direct_albedo, diffuse_albedo, sw_fluxes)
-      call catch(error)
+      if (atm%monthly) then
+        sw_fluxes%flux_dn(:,:) = 0.
+        sw_fluxes%flux_up(:,:) = 0.
+        do k = 1, size(atm%zenith_angle, 1)
+          error = rte_sw(sw_optics, .true., atm%zenith_angle(k,:,i,t), toa, direct_albedo, &
+                         diffuse_albedo, fluxes)
+          call catch(error)
+          do m = 1, block_size
+            sw_fluxes%flux_dn(m,:) = sw_fluxes%flux_dn(m,:) + atm%zenith_weight(k,m,i,t)* &
+                                     fluxes%flux_dn(m,:)
+            sw_fluxes%flux_up(m,:) = sw_fluxes%flux_up(m,:) + atm%zenith_weight(k,m,i,t)* &
+                                     fluxes%flux_up(m,:)
+          enddo
+        enddo
+      else
+        error = rte_sw(sw_optics, .true., zenith, toa, direct_albedo, diffuse_albedo, sw_fluxes)
+        call catch(error)
+      endif
     else
       !All-sky fluxes, using stochastic subcolumns.
       do j = 1, block_size
@@ -496,6 +519,8 @@ do t = 1, atm%num_times
           lw_allsky_source%sfc_source(1,:) = source%sfc_source(j,:)
           lw_allsky_fluxes%flux_dn(:,:) = 0.
           lw_allsky_fluxes%flux_up(:,:) = 0.
+          error = lw_allsky_optics%delta_scale()
+          call catch(error)
           error = rte_lw(lw_allsky_optics, .true., lw_allsky_source, emissivity(:,j:j), &
                          lw_allsky_fluxes, n_gauss_angles=1)
           call catch(error)
@@ -504,9 +529,23 @@ do t = 1, atm%num_times
 
           sw_allsky_fluxes%flux_dn(:,:) = 0.
           sw_allsky_fluxes%flux_up(:,:) = 0.
-          error = rte_sw(sw_allsky_optics, .true., zenith(j:j), toa(j:j,:), &
-                         direct_albedo(:,j:j), diffuse_albedo(:,j:j), sw_allsky_fluxes)
+          error = sw_allsky_optics%delta_scale()
           call catch(error)
+          if (atm%monthly) then
+            do m = 1, size(atm%zenith_angle, 1)
+              error = rte_sw(sw_allsky_optics, .true., atm%zenith_angle(m,j:j,i,t), toa(j:j,:), &
+                             direct_albedo(:,j:j), diffuse_albedo(:,j:j), fluxes)
+              call catch(error)
+              sw_allsky_fluxes%flux_dn(1,:) = sw_allsky_fluxes%flux_dn(1,:) + fluxes%flux_dn(1,:)* &
+                                              atm%zenith_weight(m,j,i,t)
+              sw_allsky_fluxes%flux_up(1,:) = sw_allsky_fluxes%flux_up(1,:) + fluxes%flux_up(1,:)* &
+                                              atm%zenith_weight(m,j,i,t)
+            enddo
+          else
+            error = rte_sw(sw_allsky_optics, .true., zenith(j:j), toa(j:j,:), &
+                           direct_albedo(:,j:j), diffuse_albedo(:,j:j), sw_allsky_fluxes)
+            call catch(error)
+          endif
           sw_fluxes%flux_dn(j,:) = sw_fluxes%flux_dn(j,:) + sw_allsky_fluxes%flux_dn(1,:)
           sw_fluxes%flux_up(j,:) = sw_fluxes%flux_up(j,:) + sw_allsky_fluxes%flux_up(1,:)
         enddo
@@ -519,9 +558,11 @@ do t = 1, atm%num_times
     do j = 1, block_size
       call write_output(output, rld, lw_fluxes%flux_dn, t, j, i)
       call write_output(output, rlu, lw_fluxes%flux_up, t, j, i)
-      if (atm%solar_zenith_angle(j,i,t) .lt. min_cos_zenith) then
-        sw_fluxes%flux_dn(j,:) = 0._wp
-        sw_fluxes%flux_up(j,:) = 0._wp
+      if (.not. atm%monthly) then
+        if (atm%solar_zenith_angle(j,i,t) .lt. min_cos_zenith) then
+          sw_fluxes%flux_dn(j,:) = 0._wp
+          sw_fluxes%flux_up(j,:) = 0._wp
+        endif
       endif
       call write_output(output, rsd, sw_fluxes%flux_dn, t, j, i)
       call write_output(output, rsu, sw_fluxes%flux_up, t, j, i)
@@ -578,6 +619,10 @@ if (.not. atm%clear) then
   deallocate(lw_allsky_fluxes%flux_up)
   deallocate(sw_allsky_fluxes%flux_dn)
   deallocate(sw_allsky_fluxes%flux_up)
+endif
+if (atm%monthly) then
+  deallocate(fluxes%flux_dn)
+  deallocate(fluxes%flux_up)
 endif
 
 call destroy_atmosphere(atm)

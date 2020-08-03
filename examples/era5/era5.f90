@@ -202,6 +202,7 @@ subroutine create_atmosphere(atm, parser)
   integer, dimension(12), parameter :: month_lengths = (/31, 28, 31, 30, 31, 30, 31, 31, &
                                                          30, 31, 30, 31/)
   integer :: ncid
+  integer :: num_times
   real(kind=wp), parameter :: ozone_mass = 47.997_wp
   real(kind=wp), parameter :: pi = 3.14159265359_wp
   real(kind=wp), dimension(:,:,:,:), allocatable :: pressure
@@ -214,6 +215,7 @@ subroutine create_atmosphere(atm, parser)
   integer :: t_start
   integer :: t_stop
   real(kind=wp), dimension(:,:,:,:), allocatable :: temperature
+  real(kind=wp), dimension(:), allocatable :: total_solar_irradiance
   real(kind=wp) :: total_weight
   real(kind=wp), dimension(:,:,:), allocatable :: two_meter_temperature
   real(kind=wp), parameter :: water_mass = 18.02_wp ![g mol-1].
@@ -304,8 +306,8 @@ subroutine create_atmosphere(atm, parser)
     !Calculate the integer Julian day number for the middle of each month.
     allocate(mid_month(atm%num_times))
     do i = 1, atm%num_times
-      mid_month(i) = month_lengths(i)/2
-      if (t_start .gt. 1) then
+      mid_month(i) = month_lengths(t_start + i - 1)/2
+      if (t_start .gt. 1 .or. i .gt. 1) then
         mid_month(i) = mid_month(i) + sum(month_lengths(1:(t_start + i - 2)))
       endif
     enddo
@@ -353,27 +355,30 @@ subroutine create_atmosphere(atm, parser)
   call read_variable(ncid, "lat", buffer1d)
   global_nlat = size(buffer1d)
   global_nlon = dimension_length(ncid, "lon")
+  num_times = dimension_length(ncid, "time")
   allocate(weights(global_nlat))
   weights(:) = cos(2._wp*pi*buffer1d(:)/360._wp)
   total_weight = sum(weights)
-  start(1) = 1; start(2) = 1; start(3) = t_start;
-  counts(1) = global_nlon; counts(2) = global_nlat; counts(3) = atm%num_times;
+  start(1) = 1; start(2) = 1; start(3) = 1;
+  counts(1) = global_nlon; counts(2) = global_nlat; counts(3) = num_times;
   call read_variable(ncid, "tisr", buffer3d, start(1:3), counts(1:3))
   if (atm%monthly) then
     buffer3d(:,:,:) = buffer3d(:,:,:)/(24.*seconds_per_hour)
   else
     buffer3d(:,:,:) = buffer3d(:,:,:)/seconds_per_hour
   endif
-  allocate(atm%total_solar_irradiance(atm%num_times))
-  do i = 1, atm%num_times
+  allocate(total_solar_irradiance(num_times))
+  do i = 1, num_times
     mean_irradiance = 0._wp
     do j = 1, global_nlat
       mean_irradiance = mean_irradiance + sum(buffer3d(:,j,i))*weights(j)
     enddo
-    atm%total_solar_irradiance(i) = 4._wp*mean_irradiance/(global_nlon*total_weight)
+    total_solar_irradiance(i) = 4._wp*mean_irradiance/(global_nlon*total_weight)
   enddo
   deallocate(weights)
+  allocate(atm%total_solar_irradiance(atm%num_times))
   if (.not. atm%monthly) then
+    atm%total_solar_irradiance(:) = total_solar_irradiance(t_start:t_stop)
     allocate(zenith(nlon, nlat, atm%num_times))
     do k = 1, atm%num_times
       do j = 1, nlat
@@ -385,7 +390,15 @@ subroutine create_atmosphere(atm, parser)
     allocate(atm%solar_zenith_angle(block_size, num_blocks, atm%num_times))
     call xyt_to_bnt(atm%solar_zenith_angle, zenith)
     deallocate(zenith)
+  else
+    if (num_times .ne. 12) then
+      write(error_unit, *) "Monthly input files must contain a year of data."
+      stop 1
+    endif
+    total_solar_irradiance(1) = sum(total_solar_irradiance(:))/real(num_times, kind=wp)
+    atm%total_solar_irradiance(:) = total_solar_irradiance(1)
   endif
+  deallocate(total_solar_irradiance)
 
   !Albedos.
   start(1) = x_start; start(2) = y_start; start(3) = t_start;

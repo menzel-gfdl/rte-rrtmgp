@@ -66,18 +66,21 @@ end subroutine destruct
 
 
 !> @brief Calculates cloud optics.
-elemental pure subroutine optics(self, ice_concentration, equivalent_radius, &
-                                 optical_properties)
+subroutine optics(self, ice_concentration, equivalent_radius, &
+                                 scale_factor, temperature, optical_properties)
 
   class(IceCloudOptics), intent(in) :: self
   real(kind=wp), intent(in) :: ice_concentration !< Ice concentration [g m-3].
   real(kind=wp), intent(in) :: equivalent_radius !< Particle equivalent radius [micron].
+  real(kind=wp), intent(in) :: scale_factor
+  real(kind=wp), intent(in) :: temperature
   type(OpticalProperties), intent(inout) :: optical_properties
 
   integer :: i
 
   do i = 1, size(optical_properties%bands)
-    call self%optics_(ice_concentration, equivalent_radius, i, &
+    call self%optics_(ice_concentration, equivalent_radius, &
+                      scale_factor, temperature, i, &
                       optical_properties%extinction_coefficient(i), &
                       optical_properties%single_scatter_albedo(i), &
                       optical_properties%asymmetry_factor(i))
@@ -86,13 +89,16 @@ end subroutine optics
 
 
 !> @brief Calculates cloud optics.
-elemental pure subroutine optics_(self, ice_concentration, equivalent_radius, band, &
+subroutine optics_(self, ice_concentration, equivalent_radius, &
+                                  scale_factor, temperature, band, &
                                   extinction_coefficient, single_scatter_albedo, &
                                   asymmetry_factor)
 
   class(IceCloudOptics), intent(in) :: self
   real(kind=wp), intent(in) :: ice_concentration !< Ice concentration [g m-3].
   real(kind=wp), intent(in) :: equivalent_radius !< Particle equivalent radius [micron].
+  real(kind=wp), intent(in) :: scale_factor
+  real(kind=wp), intent(in) :: temperature
   integer, intent(in) :: band !< Band index.
   real(kind=wp), intent(out) :: extinction_coefficient !< Extinction coefficient [m-1].
   real(kind=wp), intent(out) :: single_scatter_albedo !< Single-scatter albedo.
@@ -101,22 +107,24 @@ elemental pure subroutine optics_(self, ice_concentration, equivalent_radius, ba
   real(kind=wp), dimension(size(self%a, 1)) :: d
   real(kind=wp), dimension(size(self%a, 1)) :: d_inv
   integer :: i
-  real(kind=wp), parameter :: min_radius = 12.
+  real(kind=wp), parameter :: min_radius = 13.
   integer :: r
   real(kind=wp) :: radius
 
+  if (equivalent_radius .gt. 0.) then
+    radius = equivalent_radius
+  else
+    radius = ice_particle_size(temperature)
+  endif
+
   do r = 2, size(self%radii, 2)
-    if (self%radii(1,r) .gt. equivalent_radius) then
+    if (self%radii(1,r) .gt. radius) then
       exit
     endif
   enddo
   r = r - 1
 
-  if (band .le. self%last_ir_band) then
-    radius = max(min_radius, equivalent_radius)
-  else
-    radius = equivalent_radius
-  endif
+  radius = max(min_radius, scale_factor*radius)
   d(1) = 1.
   do i = 2, size(self%a, 1)
     d(i) = d(i-1)*radius
@@ -132,6 +140,35 @@ elemental pure subroutine optics_(self, ice_concentration, equivalent_radius, ba
   endif
   asymmetry_factor = sum(self%c(:,band,r)*d(:))
 end subroutine optics_
+
+
+!> @brief Donner parameterization.
+elemental function ice_particle_size(temperature) &
+  result(r)
+
+  real(kind=wp), intent(in) :: temperature !< Temperature [K].
+  real(kind=wp) :: r !< Effective ice cloud particle size [microns].
+
+  real(kind=wp), parameter :: tfreeze = 273.16_wp
+
+  if (temperature .gt. tfreeze - 25._wp) then
+    r = 100.6_wp
+  elseif (temperature .gt. tfreeze - 30._wp) then
+    r = 80.8_wp
+  elseif (temperature .gt. tfreeze - 35._wp) then
+    r = 93.5_wp
+  elseif (temperature .gt. tfreeze - 40._wp) then
+    r = 63.9_wp
+  elseif (temperature .gt. tfreeze - 45._wp) then
+    r = 42.5_wp
+  elseif (temperature .gt. tfreeze - 50._wp) then
+    r = 39.9_wp
+  elseif (temperature .gt. tfreeze - 55._wp) then
+    r = 21.6_wp
+  else
+    r = 20.2_wp
+  endif
+end function ice_particle_size
 
 
 end module ice_cloud_optics

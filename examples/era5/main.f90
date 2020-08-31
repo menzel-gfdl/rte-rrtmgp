@@ -64,6 +64,7 @@ type(OpticalProperties), dimension(:), allocatable :: cloud_liquid_optics
 real(kind=wp), dimension(:), allocatable :: ice_content
 type(IceCloudOptics) :: ice_parameterization
 real(kind=wp) :: ice_radius
+real(kind=wp) :: ice_scale_factor
 real(kind=wp), dimension(:), allocatable :: liquid_content
 type(HuStamnes) :: liquid_parameterization
 real(kind=wp) :: liquid_radius
@@ -119,6 +120,7 @@ call add_argument(parser, "-p", "Beta distribution shape parameter.", .true.)
 call add_argument(parser, "-r-liquid", "Cloud liquid drop radius (microns).", .true.)
 call add_argument(parser, "-r-ice", "Cloud ice particle radius (microns).", .true.)
 call add_argument(parser, "-s", "Overlap parameter scale length [km].", .true.)
+call add_argument(parser, "-scale-ice", "Scale factor for ice size.", .true.)
 call create_atmosphere(atm, parser)
 
 !Set the gas names.
@@ -254,11 +256,18 @@ if (.not. atm%clear) then
     call catch("-ice <file> is required when -clouds is used.")
   endif
   call ice_parameterization%construct(buffer)
+  call get_argument(parser, "-scale-ice", buffer)
+  if (trim(buffer) .eq. "not present") then
+    ice_scale_factor = 1._wp
+  else
+    read(buffer, *) ice_scale_factor
+  endif
   call get_argument(parser, "-r-ice", buffer)
   if (trim(buffer) .eq. "not present") then
-    ice_radius = 50._wp
+    ice_radius = -1._wp
   else
     read(buffer, *) ice_radius
+    ice_scale_factor = 1._wp
   endif
 
   !Allocate buffers.
@@ -455,7 +464,8 @@ do t = 1, atm%num_times
             endif
             if (ice_content(m) .gt. 0._wp) then
               !Calculate ice cloud optics where there are ice clouds.
-              call ice_parameterization%optics(ice_content(m), ice_radius, &
+              call ice_parameterization%optics(ice_content(m), ice_radius, ice_scale_factor, &
+                                               atm%layer_temperature(j,m,i,t), &
                                                cloud_ice_optics(m))
               !Convert from parameterization bands to RRTMGP bands.
               call cloud_ice_optics(m)%thick_average(lw_cloud_ice_optics_rrtmgp(m), &

@@ -381,26 +381,6 @@ do t = 1, atm%num_times
     do j = 1, num_sw_gpoints
       toa(:,j) = toa(:,j)*atm%total_solar_irradiance(t)/total_irradiance(:)
     enddo
-!   do j = 1, num_sw_bands
-!     if (j .lt. infrared_cutoff_index) then
-!       direct_albedo(j,:) = atm%surface_albedo_direct_ir(:,i,t)
-!       diffuse_albedo(j,:) = atm%surface_albedo_diffuse_ir(:,i,t)
-!     elseif (j .gt. infrared_cutoff_index) then
-!       direct_albedo(j,:) = atm%surface_albedo_direct_uv(:,i,t)
-!       diffuse_albedo(j,:) = atm%surface_albedo_diffuse_uv(:,i,t)
-!     else
-!       direct_albedo(j,:) = (atm%surface_albedo_direct_ir(:,i,t)* &
-!                            (infrared_cutoff - sw_optics%band_lims_wvn(1,j)) + &
-!                            atm%surface_albedo_direct_uv(:,i,t)* &
-!                            (sw_optics%band_lims_wvn(2,j) - infrared_cutoff))/ &
-!                            (sw_optics%band_lims_wvn(2,j) - sw_optics%band_lims_wvn(1,j))
-!       diffuse_albedo(j,:) = (atm%surface_albedo_diffuse_ir(:,i,t)* &
-!                             (infrared_cutoff - sw_optics%band_lims_wvn(1,j)) + &
-!                             atm%surface_albedo_diffuse_uv(:,i,t)* &
-!                             (sw_optics%band_lims_wvn(2,j) - infrared_cutoff))/ &
-!                             (sw_optics%band_lims_wvn(2,j) - sw_optics%band_lims_wvn(1,j))
-!     endif
-!   enddo
     do j = 1, num_sw_bands
       direct_albedo(j,:) = atm%surface_albedo(:,i,t)
       diffuse_albedo(j,:) = atm%surface_albedo(:,i,t)

@@ -231,16 +231,14 @@ subroutine create_atmosphere(atm, parser)
   real(kind=wp), dimension(:,:,:), allocatable :: zenith
 
   !Add/parse command line arguments.
-  call add_argument(parser, "level_file", "Input data file.")
-  call add_argument(parser, "single_file", "Input data file.")
-  call add_argument(parser, "albedo_file", "Input data file.")
+  call add_argument(parser, "era5_file", "Input data file.")
   call add_argument(parser, "ghg_file", "Input GHG data file.")
   call add_argument(parser, "-b", "Block size.", .true., "--block-size")
   call add_argument(parser, "-CFC-11", "Year for CFC-11 abundance.", .true.)
   call add_argument(parser, "-CFC-12", "Year for CFC-12 abundance.", .true.)
   call add_argument(parser, "-CFC-113", "Year for CFC-113 abundance.", .true.)
   call add_argument(parser, "-CH4", "Year for CH4 abundance.", .true.)
-  call add_argument(parser, "-clouds", "Cloud input data file.", .true.)
+  call add_argument(parser, "-clouds", "Include clouds.", .false.)
   call add_argument(parser, "-CO2", "Year for CO2 abundance.", .true.)
   call add_argument(parser, "-HCFC-22", "Year for HCFC-22 abundance.", .true.)
   call add_argument(parser, "-H2O", "Include H2O.", .false.)
@@ -259,8 +257,8 @@ subroutine create_atmosphere(atm, parser)
   call add_argument(parser, "-Z", "Ending layer index.", .true., "--layer-upper-bound")
   call parse_args(parser)
 
-  !Open the single file.
-  call get_argument(parser, "single_file", buffer)
+  !Open the era5 input file.
+  call get_argument(parser, "era5_file", buffer)
   ncid = open_dataset(buffer)
 
   !Determine if the data is monthly.
@@ -400,22 +398,6 @@ subroutine create_atmosphere(atm, parser)
   endif
   deallocate(total_solar_irradiance)
 
-  !Albedos.
-  start(1) = x_start; start(2) = y_start; start(3) = t_start;
-  counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_times;
-  call read_variable(ncid, "alnid", buffer3d, start(1:3), counts(1:3))
-  allocate(atm%surface_albedo_diffuse_ir(block_size, num_blocks, atm%num_times))
-  call xyt_to_bnt(atm%surface_albedo_diffuse_ir, buffer3d)
-  call read_variable(ncid, "aluvd", buffer3d, start(1:3), counts(1:3))
-  allocate(atm%surface_albedo_diffuse_uv(block_size, num_blocks, atm%num_times))
-  call xyt_to_bnt(atm%surface_albedo_diffuse_uv, buffer3d)
-  call read_variable(ncid, "alnip", buffer3d, start(1:3), counts(1:3))
-  allocate(atm%surface_albedo_direct_ir(block_size, num_blocks, atm%num_times))
-  call xyt_to_bnt(atm%surface_albedo_direct_ir, buffer3d)
-  call read_variable(ncid, "aluvp", buffer3d, start(1:3), counts(1:3))
-  allocate(atm%surface_albedo_direct_uv(block_size, num_blocks, atm%num_times))
-  call xyt_to_bnt(atm%surface_albedo_direct_uv, buffer3d)
-
   !Surface pressure.
   start(1) = x_start; start(2) = y_start; start(3) = t_start;
   counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_times;
@@ -425,11 +407,6 @@ subroutine create_atmosphere(atm, parser)
   start(1) = x_start; start(2) = y_start; start(3) = t_start;
   counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_times;
   call read_variable(ncid, "t2m", two_meter_temperature, start(1:3), counts(1:3))
-
-  !Close the single file and open the level file.
-  call close_dataset(ncid)
-  call get_argument(parser, "level_file", buffer)
-  ncid = open_dataset(buffer)
 
   !Determine the number of layers.
   z_start = input_index(parser, "-z", 1)
@@ -498,7 +475,7 @@ subroutine create_atmosphere(atm, parser)
   !Convert from (mass water)/(mass total air) to (mole water)/(mole dry air).
   xh2o(:,:,:,:) = (dry_air_mass/water_mass)*xh2o(:,:,:,:)/(1._wp - xh2o(:,:,:,:))
 
-  !Read water vapor and ozone from the level file.
+  !Read water vapor and ozone.
   molecules(1)%id = h2o; molecules(1)%flag = "-H2O"
   molecules(2)%id = o3; molecules(2)%flag = "-O3"; molecules(2)%name = "o3"; molecules(2)%mass = ozone_mass
   do i = 1, 2
@@ -518,8 +495,66 @@ subroutine create_atmosphere(atm, parser)
     endif
   enddo
 
-  !Close the level file and open the greenhouse gas file.
+  !Read in the surface albedo.
+  start(1) = x_start; start(2) = y_start; start(3) = t_start;
+  counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_times;
+  call read_variable(ncid, "fal", buffer3d, start(1:3), counts(1:3))
+  allocate(atm%surface_albedo(block_size, num_blocks, atm%num_times))
+  call xyt_to_bnt(atm%surface_albedo, buffer3d)
+
+  !Determine if the run is all-sky or clear-sky.
+  call get_argument(parser, "-clouds", buffer)
+  atm%clear = trim(buffer) .eq. "not present"
+  if (.not. atm%clear) then
+    !Convert from (mole water)/(mole dry air) to (mole water)/(mole total air).
+    xh2o(:,:,:,:) = xh2o(:,:,:,:)/(1._wp + xh2o(:,:,:,:))
+
+    !Calculate total air density.
+    allocate(air_density(block_size, atm%num_layers, num_blocks, atm%num_times))
+!   air_density = (xh2o(:,:,:,:)*atm%layer_pressure(:,:,:,:))/ &
+!                 (r_h2o*atm%layer_temperature(:,:,:,:)) + &
+!                 ((1._wp - xh2o(:,:,:,:))*atm%layer_pressure)/ &
+!                 (r_dry_air*atm%layer_temperature(:,:,:,:))
+    air_density(:,:,:,:) = (atm%layer_pressure(:,:,:,:)*(29.9647/1000.))/ &
+                           (atm%layer_temperature(:,:,:,:)*8.314462)
+
+    !Calculate layer thickness.
+    allocate(atm%layer_thickness(block_size, atm%num_layers, num_blocks, atm%num_times))
+!   atm%layer_thickness(:,:,:,:) = abs(atm%level_pressure(:,2:,:,:) - &
+!                                  atm%level_pressure(:,:atm%num_layers,:,:))/ &
+!                                  (air_density(:,:,:,:)*9.81)
+    atm%layer_thickness(:,:,:,:) = &
+      (abs(log(atm%level_pressure(:,:atm%num_layers,:,:)) - &
+      log(atm%level_pressure(:,2:,:,:)))* &
+      atm%layer_temperature(:,:,:,:)*8.314462)/((29.9647/1000.)*9.81)
+
+    !Read in and calculate cloud inputs.
+    start(1) = x_start; start(2) = y_start; start(3) = z_start; start(4) = t_start;
+    counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_layers; counts(4) = atm%num_times;
+    call read_variable(ncid, "cc", buffer4d, start, counts)
+    allocate(atm%cloud_fraction(block_size, atm%num_layers, num_blocks, atm%num_times))
+    call xyzt_to_bznt(atm%cloud_fraction, buffer4d)
+    call read_variable(ncid, "ciwc", buffer4d, start, counts)
+    allocate(atm%cloud_ice_content(block_size, atm%num_layers, num_blocks, atm%num_times))
+    call xyzt_to_bznt(atm%cloud_ice_content, buffer4d)
+    where (atm%cloud_fraction .gt. 0.)
+      atm%cloud_ice_content(:,:,:,:) = air_density(:,:,:,:)*atm%cloud_ice_content(:,:,:,:)*kg_to_g
+    elsewhere
+      atm%cloud_ice_content(:,:,:,:) = 0.
+    endwhere
+    call read_variable(ncid, "clwc", buffer4d, start, counts)
+    allocate(atm%cloud_liquid_content(block_size, atm%num_layers, num_blocks, atm%num_times))
+    call xyzt_to_bznt(atm%cloud_liquid_content, buffer4d)
+    where (atm%cloud_fraction .gt. 0.)
+      atm%cloud_liquid_content(:,:,:,:) = air_density(:,:,:,:)*atm%cloud_liquid_content(:,:,:,:)*kg_to_g
+    elsewhere
+      atm%cloud_liquid_content(:,:,:,:) = 0.
+    endwhere
+    deallocate(air_density)
+  endif
   call close_dataset(ncid)
+
+  !Open the greenhouse gas file.
   call get_argument(parser, "ghg_file", buffer)
   ncid = open_dataset(buffer)
 
@@ -554,68 +589,6 @@ subroutine create_atmosphere(atm, parser)
     atm%ppmv(:,:,:,:,atm%num_molecules) = input_abundance*from_ppmv
   endif
 
-  !Read in the surface albedo from its own file.
-  call get_argument(parser, "albedo_file", buffer)
-  ncid = open_dataset(buffer)
-  start(1) = x_start; start(2) = y_start; start(3) = t_start;
-  counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_times;
-  call read_variable(ncid, "fal", buffer3d, start(1:3), counts(1:3))
-  allocate(atm%surface_albedo(block_size, num_blocks, atm%num_times))
-  call xyt_to_bnt(atm%surface_albedo, buffer3d)
-  call close_dataset(ncid)
-
-  !Determine if the run is all-sky or clear-sky.
-  call get_argument(parser, "-clouds", buffer)
-  atm%clear = trim(buffer) .eq. "not present"
-  if (.not. atm%clear) then
-    !Convert from (mole water)/(mole dry air) to (mole water)/(mole total air).
-    xh2o(:,:,:,:) = xh2o(:,:,:,:)/(1._wp + xh2o(:,:,:,:))
-
-    !Calculate total air density.
-    allocate(air_density(block_size, atm%num_layers, num_blocks, atm%num_times))
-!   air_density = (xh2o(:,:,:,:)*atm%layer_pressure(:,:,:,:))/ &
-!                 (r_h2o*atm%layer_temperature(:,:,:,:)) + &
-!                 ((1._wp - xh2o(:,:,:,:))*atm%layer_pressure)/ &
-!                 (r_dry_air*atm%layer_temperature(:,:,:,:))
-    air_density(:,:,:,:) = (atm%layer_pressure(:,:,:,:)*(29.9647/1000.))/ &
-                           (atm%layer_temperature(:,:,:,:)*8.314462)
-
-    !Calculate layer thickness.
-    allocate(atm%layer_thickness(block_size, atm%num_layers, num_blocks, atm%num_times))
-!   atm%layer_thickness(:,:,:,:) = abs(atm%level_pressure(:,2:,:,:) - &
-!                                  atm%level_pressure(:,:atm%num_layers,:,:))/ &
-!                                  (air_density(:,:,:,:)*9.81)
-    atm%layer_thickness(:,:,:,:) = &
-      (abs(log(atm%level_pressure(:,:atm%num_layers,:,:)) - &
-      log(atm%level_pressure(:,2:,:,:)))* &
-      atm%layer_temperature(:,:,:,:)*8.314462)/((29.9647/1000.)*9.81)
-
-    !Read in and calculate cloud inputs.
-    ncid = open_dataset(buffer)
-    start(1) = x_start; start(2) = y_start; start(3) = z_start; start(4) = t_start;
-    counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_layers; counts(4) = atm%num_times;
-    call read_variable(ncid, "cc", buffer4d, start, counts)
-    allocate(atm%cloud_fraction(block_size, atm%num_layers, num_blocks, atm%num_times))
-    call xyzt_to_bznt(atm%cloud_fraction, buffer4d)
-    call read_variable(ncid, "ciwc", buffer4d, start, counts)
-    allocate(atm%cloud_ice_content(block_size, atm%num_layers, num_blocks, atm%num_times))
-    call xyzt_to_bznt(atm%cloud_ice_content, buffer4d)
-    where (atm%cloud_fraction .gt. 0.)
-      atm%cloud_ice_content(:,:,:,:) = air_density(:,:,:,:)*atm%cloud_ice_content(:,:,:,:)*kg_to_g
-    elsewhere
-      atm%cloud_ice_content(:,:,:,:) = 0.
-    endwhere
-    call read_variable(ncid, "clwc", buffer4d, start, counts)
-    allocate(atm%cloud_liquid_content(block_size, atm%num_layers, num_blocks, atm%num_times))
-    call xyzt_to_bznt(atm%cloud_liquid_content, buffer4d)
-    where (atm%cloud_fraction .gt. 0.)
-      atm%cloud_liquid_content(:,:,:,:) = air_density(:,:,:,:)*atm%cloud_liquid_content(:,:,:,:)*kg_to_g
-    elsewhere
-      atm%cloud_liquid_content(:,:,:,:) = 0.
-    endwhere
-    deallocate(air_density)
-    call close_dataset(ncid)
-  endif
   deallocate(xh2o)
   if (allocated(buffer1d)) deallocate(buffer1d)
   if (allocated(buffer3d)) deallocate(buffer3d)
@@ -654,8 +627,6 @@ subroutine destroy_atmosphere(atm)
   if (allocated(atm%zenith_angle)) deallocate(atm%zenith_angle)
   if (allocated(atm%zenith_weight)) deallocate(atm%zenith_weight)
 end subroutine destroy_atmosphere
-
-
 
 
 !> @brief Create an output file and write metadata.

@@ -177,12 +177,31 @@ subroutine create_atmosphere(atm, parser)
     real(kind=wp) :: mass
   end type MoleculeMeta_t
 
+  integer, parameter :: albedo_id = 1
+  integer, parameter :: cloud_cover_id = 2
+  integer, parameter :: ice_water_content_id = 3
+  integer, parameter :: incident_solar_id = 4
+  integer, parameter :: lat_id = 5
+  integer, parameter :: liquid_water_content_id = 6
+  integer, parameter :: lon_id = 7
+  integer, parameter :: ozone_id = 8
+  integer, parameter :: pressure_id = 9
+  integer, parameter :: sigma_level_id = 10
+  integer, parameter :: surface_pressure_id = 11
+  integer, parameter :: surface_temperature_id = 12
+  integer, parameter :: temperature_id = 13
+  integer, parameter :: time_id = 14
+  integer, parameter :: two_meter_temperature_id = 15
+  integer, parameter :: water_id = 16
+
   real(kind=wp), dimension(:,:,:,:), allocatable :: air_density
   real(kind=wp), dimension(:,:), allocatable :: blocked_latitude
   character(len=valuelen) :: buffer
   real(kind=wp), dimension(:), allocatable :: buffer1d
   real(kind=wp), dimension(:,:,:), allocatable :: buffer3d
   real(kind=wp), dimension(:,:,:,:), allocatable :: buffer4d
+  character(len=16) :: clim_except_var
+  character(len=16) :: clim_var
   integer, dimension(4) :: counts
   real(kind=wp), parameter :: dry_air_mass = 28.9647_wp ![g mol-1].
   real(kind=wp), parameter :: from_ppmv = 1.e-6_wp
@@ -201,7 +220,9 @@ subroutine create_atmosphere(atm, parser)
   type(MoleculeMeta_t), dimension(num_molecules) :: molecules
   integer, dimension(12), parameter :: month_lengths = (/31, 28, 31, 30, 31, 30, 31, 31, &
                                                          30, 31, 30, 31/)
-  integer :: ncid
+  integer, dimension(water_id) :: ncid
+  integer :: ncid_clim
+  integer :: ncid_era5
   integer :: num_times
   real(kind=wp), parameter :: ozone_mass = 47.997_wp
   real(kind=wp), parameter :: pi = 3.14159265359_wp
@@ -218,6 +239,8 @@ subroutine create_atmosphere(atm, parser)
   real(kind=wp), dimension(:), allocatable :: total_solar_irradiance
   real(kind=wp) :: total_weight
   real(kind=wp), dimension(:,:,:), allocatable :: two_meter_temperature
+  logical :: using_climatology
+  logical :: using_era5_input
   real(kind=wp), parameter :: water_mass = 18.02_wp ![g mol-1].
   real(kind=wp), dimension(:), allocatable :: weights
   integer :: x_start
@@ -231,15 +254,20 @@ subroutine create_atmosphere(atm, parser)
   real(kind=wp), dimension(:,:,:), allocatable :: zenith
 
   !Add/parse command line arguments.
-  call add_argument(parser, "era5_file", "Input data file.")
   call add_argument(parser, "ghg_file", "Input GHG data file.")
   call add_argument(parser, "-b", "Block size.", .true., "--block-size")
   call add_argument(parser, "-CFC-11", "Year for CFC-11 abundance.", .true.)
   call add_argument(parser, "-CFC-12", "Year for CFC-12 abundance.", .true.)
   call add_argument(parser, "-CFC-113", "Year for CFC-113 abundance.", .true.)
   call add_argument(parser, "-CH4", "Year for CH4 abundance.", .true.)
+  call add_argument(parser, "-clim-file", "Climatology file.", .true.)
+  call add_argument(parser, "-clim-except-var", "Use climatology values for all inputs" &
+                    //" except this one.", .true.)
+  call add_argument(parser, "-clim-var", "Use climatology values for this input.", &
+                    .true.)
   call add_argument(parser, "-clouds", "Include clouds.", .false.)
   call add_argument(parser, "-CO2", "Year for CO2 abundance.", .true.)
+  call add_argument(parser, "-era5_file", "Input data file.", .true.)
   call add_argument(parser, "-HCFC-22", "Year for HCFC-22 abundance.", .true.)
   call add_argument(parser, "-H2O", "Include H2O.", .false.)
   call add_argument(parser, "-monthly", "Use 3 zenith angle approximation for monthly data.", &
@@ -257,9 +285,109 @@ subroutine create_atmosphere(atm, parser)
   call add_argument(parser, "-Z", "Ending layer index.", .true., "--layer-upper-bound")
   call parse_args(parser)
 
-  !Open the era5 input file.
-  call get_argument(parser, "era5_file", buffer)
-  ncid = open_dataset(buffer)
+  !Check for use of a climatology file.
+  call get_argument(parser, "-clim-var", clim_var)
+  call get_argument(parser, "-clim-except-var", clim_except_var)
+  if (trim(clim_var) .ne. "not present" .and. trim(clim_except_var) &
+      .ne. "not present") then
+    write(error_unit, *) "-clim-var and -clim-except-var cannot be used simultaneously."
+    stop 1
+  endif
+  using_climatology = trim(clim_var) .ne. "not present" .or. trim(clim_except_var) &
+                      .ne. "not present"
+  using_era5_input = .not. using_climatology .or. (using_climatology .and. &
+                     trim(clim_var) .ne. "all")
+  if (using_era5_input) then
+    !Open the era5 input file.
+    call get_argument(parser, "-era5_file", buffer)
+    if (trim(buffer) .eq. "not present") then
+      write(error_unit, *) "-era5_file argument is required if not using -clim-var all."
+      stop 1
+    endif
+    ncid_era5 = open_dataset(buffer)
+  endif
+  if (using_climatology) then
+    !Open the climatology file.
+    call get_argument(parser, "-clim-file", buffer)
+    if (trim(buffer) .eq. "not present") then
+      write(error_unit, *) "-clim-file argument is required if -clim-var option is used."
+      stop 1
+    endif
+    ncid_clim = open_dataset(trim(buffer))
+    if (trim(clim_var) .eq. "all") then
+      ncid(:) = ncid_clim
+    elseif (trim(clim_var) .ne. "not present") then
+      ncid(:) = ncid_era5
+      select case (trim(clim_var))
+        case ("fal")
+          ncid(albedo_id) = ncid_clim
+        case ("cc")
+          ncid(cloud_cover_id) = ncid_clim
+        case ("ciwc")
+          ncid(ice_water_content_id) = ncid_clim
+        case ("tisr")
+          ncid(incident_solar_id) = ncid_clim
+        case ("lat")
+          ncid(lat_id) = ncid_clim
+        case ("clwc")
+          ncid(liquid_water_content_id) = ncid_clim
+        case ("lon")
+          ncid(lon_id) = ncid_clim
+        case ("o3")
+          ncid(ozone_id) = ncid_clim
+        case ("p")
+          ncid(pressure_id) = ncid_clim
+        case ("sp")
+          ncid(surface_pressure_id) = ncid_clim
+        case ("skt")
+          ncid(surface_temperature_id) = ncid_clim
+        case ("t")
+          ncid(temperature_id) = ncid_clim
+        case ("time")
+          ncid(time_id) = ncid_clim
+        case ("t2m")
+          ncid(two_meter_temperature_id) = ncid_clim
+        case ("q")
+          ncid(water_id) = ncid_clim
+      end select
+    elseif (trim(clim_except_var) .ne. "not present") then
+      ncid(:) = ncid_clim
+      select case (trim(clim_except_var))
+        case ("fal")
+          ncid(albedo_id) = ncid_era5
+        case ("cc")
+          ncid(cloud_cover_id) = ncid_era5
+        case ("ciwc")
+          ncid(ice_water_content_id) = ncid_era5
+        case ("tisr")
+          ncid(incident_solar_id) = ncid_era5
+        case ("lat")
+          ncid(lat_id) = ncid_era5
+        case ("clwc")
+          ncid(liquid_water_content_id) = ncid_era5
+        case ("lon")
+          ncid(lon_id) = ncid_era5
+        case ("o3")
+          ncid(ozone_id) = ncid_era5
+        case ("p")
+          ncid(pressure_id) = ncid_era5
+        case ("sp")
+          ncid(surface_pressure_id) = ncid_era5
+        case ("skt")
+          ncid(surface_temperature_id) = ncid_era5
+        case ("t")
+          ncid(temperature_id) = ncid_era5
+        case ("time")
+          ncid(time_id) = ncid_era5
+        case ("t2m")
+          ncid(two_meter_temperature_id) = ncid_era5
+        case ("q")
+          ncid(water_id) = ncid_era5
+      end select
+    endif
+  else
+    ncid(:) = ncid_era5
+  endif
 
   !Determine if the data is monthly.
   call get_argument(parser, "-monthly", buffer)
@@ -267,25 +395,25 @@ subroutine create_atmosphere(atm, parser)
 
   !Determine the number of times.
   t_start = input_index(parser, "-t", 1)
-  t_stop = input_index(parser, "-T", dimension_length(ncid, "time"))
+  t_stop = input_index(parser, "-T", dimension_length(ncid(time_id), "time"))
   atm%num_times = t_stop - t_start + 1
 
   !Determine the number of columns.
   x_start = input_index(parser, "-x", 1)
-  x_stop = input_index(parser, "-X", dimension_length(ncid, "lon"))
+  x_stop = input_index(parser, "-X", dimension_length(ncid(lon_id), "lon"))
   nlon = x_stop - x_start + 1
   y_start = input_index(parser, "-y", 1)
-  y_stop = input_index(parser, "-Y", dimension_length(ncid, "lat"))
+  y_stop = input_index(parser, "-Y", dimension_length(ncid(lat_id), "lat"))
   nlat = y_stop - y_start + 1
   atm%num_columns = nlon*nlat;
 
   !Store axis data so it can be copied to the output file.
   start(1) = x_start; counts(1) = nlon;
-  call read_variable(ncid, "lon", atm%longitude, start(1:1), counts(1:1))
+  call read_variable(ncid(lon_id), "lon", atm%longitude, start(1:1), counts(1:1))
   start(1) = y_start; counts(1) = nlat;
-  call read_variable(ncid, "lat", atm%latitude, start(1:1), counts(1:1))
+  call read_variable(ncid(lat_id), "lat", atm%latitude, start(1:1), counts(1:1))
   start(1) = t_start; counts(1) = atm%num_times;
-  call read_variable(ncid, "time", atm%time, start(1:1), counts(1:1))
+  call read_variable(ncid(time_id), "time", atm%time, start(1:1), counts(1:1))
 
   !Determine mapping from columns to blocks.
   call get_argument(parser, "-b", buffer)
@@ -345,21 +473,21 @@ subroutine create_atmosphere(atm, parser)
   !Surface temperature.
   start(1) = x_start; start(2) = y_start; start(3) = t_start;
   counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_times;
-  call read_variable(ncid, "skt", buffer3d, start(1:3), counts(1:3))
+  call read_variable(ncid(surface_temperature_id), "skt", buffer3d, start(1:3), counts(1:3))
   allocate(atm%surface_temperature(block_size, num_blocks, atm%num_times))
   call xyt_to_bnt(atm%surface_temperature, buffer3d)
 
   !Calculate the solar zenith angle and mean solar irradiance.
-  call read_variable(ncid, "lat", buffer1d)
+  call read_variable(ncid(lat_id), "lat", buffer1d)
   global_nlat = size(buffer1d)
-  global_nlon = dimension_length(ncid, "lon")
-  num_times = dimension_length(ncid, "time")
+  global_nlon = dimension_length(ncid(lon_id), "lon")
+  num_times = dimension_length(ncid(time_id), "time")
   allocate(weights(global_nlat))
   weights(:) = cos(2._wp*pi*buffer1d(:)/360._wp)
   total_weight = sum(weights)
   start(1) = 1; start(2) = 1; start(3) = 1;
   counts(1) = global_nlon; counts(2) = global_nlat; counts(3) = num_times;
-  call read_variable(ncid, "tisr", buffer3d, start(1:3), counts(1:3))
+  call read_variable(ncid(incident_solar_id), "tisr", buffer3d, start(1:3), counts(1:3))
   if (atm%monthly) then
     buffer3d(:,:,:) = buffer3d(:,:,:)/(24.*seconds_per_hour)
   else
@@ -401,16 +529,18 @@ subroutine create_atmosphere(atm, parser)
   !Surface pressure.
   start(1) = x_start; start(2) = y_start; start(3) = t_start;
   counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_times;
-  call read_variable(ncid, "sp", surface_pressure, start(1:3), counts(1:3))
+  call read_variable(ncid(surface_pressure_id), "sp", surface_pressure, start(1:3), &
+                     counts(1:3))
 
   !Two meter temperature;
   start(1) = x_start; start(2) = y_start; start(3) = t_start;
   counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_times;
-  call read_variable(ncid, "t2m", two_meter_temperature, start(1:3), counts(1:3))
+  call read_variable(ncid(two_meter_temperature_id), "t2m", two_meter_temperature, &
+                     start(1:3), counts(1:3))
 
   !Determine the number of layers.
   z_start = input_index(parser, "-z", 1)
-  z_stop = input_index(parser, "-Z", dimension_length(ncid, "sigma_level"))
+  z_stop = input_index(parser, "-Z", dimension_length(ncid(sigma_level_id), "sigma_level"))
   atm%num_layers = z_stop - z_start + 1
   nlevel = atm%num_layers + 1
   atm%num_levels = nlevel
@@ -424,7 +554,7 @@ subroutine create_atmosphere(atm, parser)
   !Pressure.
   start(1) = x_start; start(2) = y_start; start(3) = z_start; start(4) = t_start;
   counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_layers; counts(4) = atm%num_times;
-  call read_variable(ncid, "p", pressure, start, counts)
+  call read_variable(ncid(pressure_id), "p", pressure, start, counts)
   pressure(:,:,:,:) = mb_to_pa*pressure(:,:,:,:)
   allocate(atm%layer_pressure(block_size, atm%num_layers, num_blocks, atm%num_times))
   call xyzt_to_bznt(atm%layer_pressure, pressure)
@@ -442,7 +572,7 @@ subroutine create_atmosphere(atm, parser)
   !Temperature.
   start(1) = x_start; start(2) = y_start; start(3) = z_start; start(4) = t_start;
   counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_layers; counts(4) = atm%num_times;
-  call read_variable(ncid, "t", temperature, start, counts)
+  call read_variable(ncid(temperature_id), "t", temperature, start, counts)
   allocate(atm%layer_temperature(block_size, atm%num_layers, num_blocks, atm%num_times))
   call xyzt_to_bznt(atm%layer_temperature, temperature)
   allocate(level_temperature(nlon, nlat, atm%num_levels, atm%num_times))
@@ -468,7 +598,7 @@ subroutine create_atmosphere(atm, parser)
   !Get water abundance.
   start(1) = x_start; start(2) = y_start; start(3) = z_start; start(4) = t_start;
   counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_layers; counts(4) = atm%num_times;
-  call read_variable(ncid, "q", buffer4d, start, counts)
+  call read_variable(ncid(water_id), "q", buffer4d, start, counts)
   allocate(xh2o(block_size, atm%num_layers, num_blocks, atm%num_times))
   call xyzt_to_bznt(xh2o, buffer4d)
 
@@ -488,7 +618,7 @@ subroutine create_atmosphere(atm, parser)
       else
         start(1) = x_start; start(2) = y_start; start(3) = z_start; start(4) = t_start;
         counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_layers; counts(4) = atm%num_times;
-        call read_variable(ncid, trim(molecules(i)%name), buffer4d, start, counts)
+        call read_variable(ncid(ozone_id), trim(molecules(i)%name), buffer4d, start, counts)
         buffer4d(:,:,:,:) = (dry_air_mass/molecules(i)%mass)*buffer4d(:,:,:,:)
         call xyzt_to_bznt(atm%ppmv(:,:,:,:,atm%num_molecules), buffer4d)
       endif
@@ -498,7 +628,7 @@ subroutine create_atmosphere(atm, parser)
   !Read in the surface albedo.
   start(1) = x_start; start(2) = y_start; start(3) = t_start;
   counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_times;
-  call read_variable(ncid, "fal", buffer3d, start(1:3), counts(1:3))
+  call read_variable(ncid(albedo_id), "fal", buffer3d, start(1:3), counts(1:3))
   allocate(atm%surface_albedo(block_size, num_blocks, atm%num_times))
   call xyt_to_bnt(atm%surface_albedo, buffer3d)
 
@@ -531,10 +661,10 @@ subroutine create_atmosphere(atm, parser)
     !Read in and calculate cloud inputs.
     start(1) = x_start; start(2) = y_start; start(3) = z_start; start(4) = t_start;
     counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_layers; counts(4) = atm%num_times;
-    call read_variable(ncid, "cc", buffer4d, start, counts)
+    call read_variable(ncid(cloud_cover_id), "cc", buffer4d, start, counts)
     allocate(atm%cloud_fraction(block_size, atm%num_layers, num_blocks, atm%num_times))
     call xyzt_to_bznt(atm%cloud_fraction, buffer4d)
-    call read_variable(ncid, "ciwc", buffer4d, start, counts)
+    call read_variable(ncid(ice_water_content_id), "ciwc", buffer4d, start, counts)
     allocate(atm%cloud_ice_content(block_size, atm%num_layers, num_blocks, atm%num_times))
     call xyzt_to_bznt(atm%cloud_ice_content, buffer4d)
     where (atm%cloud_fraction .gt. 0.)
@@ -542,7 +672,7 @@ subroutine create_atmosphere(atm, parser)
     elsewhere
       atm%cloud_ice_content(:,:,:,:) = 0.
     endwhere
-    call read_variable(ncid, "clwc", buffer4d, start, counts)
+    call read_variable(ncid(liquid_water_content_id), "clwc", buffer4d, start, counts)
     allocate(atm%cloud_liquid_content(block_size, atm%num_layers, num_blocks, atm%num_times))
     call xyzt_to_bznt(atm%cloud_liquid_content, buffer4d)
     where (atm%cloud_fraction .gt. 0.)
@@ -552,11 +682,16 @@ subroutine create_atmosphere(atm, parser)
     endwhere
     deallocate(air_density)
   endif
-  call close_dataset(ncid)
+  if (using_climatology) then
+    call close_dataset(ncid_clim)
+  endif
+  if (using_era5_input) then
+    call close_dataset(ncid_era5)
+  endif
 
   !Open the greenhouse gas file.
   call get_argument(parser, "ghg_file", buffer)
-  ncid = open_dataset(buffer)
+  ncid(1) = open_dataset(buffer)
 
   !Get the molecular abundance from their input year.
   molecules(3)%id = co2; molecules(3)%flag = "-CO2"; molecules(3)%name = "co2"
@@ -573,11 +708,11 @@ subroutine create_atmosphere(atm, parser)
       atm%molecules(atm%num_molecules) = molecules(i)%id
       read(buffer, *) year
       start(1) = int(year); counts(1) = 1
-      call read_variable(ncid, trim(molecules(i)%name), buffer1d, start(1:1), counts(1:1))
+      call read_variable(ncid(1), trim(molecules(i)%name), buffer1d, start(1:1), counts(1:1))
       atm%ppmv(:,:,:,:,atm%num_molecules) = buffer1d(1)*from_ppmv
     endif
   enddo
-  call close_dataset(ncid)
+  call close_dataset(ncid(1))
 
   !Get the molecular abundance from the command line.
   molecules(10)%id = o2; molecules(10)%flag = "-O2"; molecules(10)%name = "o2"

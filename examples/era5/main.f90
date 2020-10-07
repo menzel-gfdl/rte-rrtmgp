@@ -14,6 +14,7 @@ use stochastic_clouds, only: overlap_parameter, TotalWaterPDF
 use mo_fluxes, only: ty_fluxes_broadband
 use mo_gas_concentrations, only: ty_gas_concs
 use mo_gas_optics_rrtmgp, only: ty_gas_optics_rrtmgp
+use mo_heating_rates, only: compute_heating_rate
 use mo_rte_kind, only: wp
 use mo_load_coefficients, only: load_and_init
 use mo_optical_props, only: ty_optical_props_1scl, ty_optical_props_2str
@@ -105,6 +106,8 @@ type(ty_fluxes_broadband) :: sw_fluxes
 type(ty_fluxes_broadband) :: fluxes
 real(kind=wp), dimension(:), allocatable :: total_irradiance
 real(kind=wp), dimension(:), allocatable :: zenith
+real(kind=wp), dimension(:,:), allocatable :: lw_heating_rate
+real(kind=wp), dimension(:,:), allocatable :: sw_heating_rate
 
 !Add arguments.
 parser = create_parser()
@@ -336,6 +339,8 @@ allocate(lw_fluxes%flux_dn(block_size, atm%num_levels))
 allocate(lw_fluxes%flux_up(block_size, atm%num_levels))
 allocate(sw_fluxes%flux_dn(block_size, atm%num_levels))
 allocate(sw_fluxes%flux_up(block_size, atm%num_levels))
+allocate(lw_heating_rate(block_size, atm%num_layers))
+allocate(sw_heating_rate(block_size, atm%num_layers))
 if (atm%monthly) then
   allocate(fluxes%flux_dn(block_size, atm%num_levels))
   allocate(fluxes%flux_up(block_size, atm%num_levels))
@@ -545,17 +550,26 @@ do t = 1, atm%num_times
         sw_fluxes%flux_up(j,:) = sw_fluxes%flux_up(j,:)/num_subcolumns
       enddo
     endif
+    error = compute_heating_rate(lw_fluxes%flux_up, lw_fluxes%flux_dn, &
+                                 atm%level_pressure(:,:,i,t), lw_heating_rate)
+    call catch(error)
+    error = compute_heating_rate(sw_fluxes%flux_up, sw_fluxes%flux_dn, &
+                                 atm%level_pressure(:,:,i,t), sw_heating_rate)
+    call catch(error)
     do j = 1, block_size
       call write_output(output, rld, lw_fluxes%flux_dn, t, j, i)
       call write_output(output, rlu, lw_fluxes%flux_up, t, j, i)
+      call write_output(output, rlhr, lw_heating_rate, t, j, i)
       if (.not. atm%monthly) then
         if (atm%solar_zenith_angle(j,i,t) .lt. min_cos_zenith) then
           sw_fluxes%flux_dn(j,:) = 0._wp
           sw_fluxes%flux_up(j,:) = 0._wp
+          sw_heating_rate(j,:) = 0._wp
         endif
       endif
       call write_output(output, rsd, sw_fluxes%flux_dn, t, j, i)
       call write_output(output, rsu, sw_fluxes%flux_up, t, j, i)
+      call write_output(output, rshr, sw_heating_rate, t, j, i)
     enddo
   enddo
 enddo
@@ -632,6 +646,8 @@ call sw_optics%finalize()
 deallocate(toa)
 deallocate(total_irradiance)
 deallocate(zenith)
+deallocate(lw_heating_rate)
+deallocate(sw_heating_rate)
 
 
 contains

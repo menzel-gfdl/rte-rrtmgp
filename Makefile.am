@@ -89,6 +89,7 @@ $(clouds)/stochastic_clouds.lo: $(clouds)/incomplete_beta.lo
 #ERA5 executable.
 era5 = $(top_srcdir)/examples/era5
 era5_SOURCES = $(era5)/argparse.f90 \
+               $(top_srcdir)/extensions/mo_heating_rates.F90 \
                $(era5)/era5.f90 \
                $(era5)/zenith.f90 \
                $(era5)/main.f90 \
@@ -101,6 +102,7 @@ $(era5)/era5.$(OBJEXT): $(era5)/argparse.$(OBJEXT) \
                         $(era5)/zenith.$(OBJEXT)
 $(era5)/main.$(OBJEXT): $(era5)/era5.$(OBJEXT) \
                         $(era5)/argparse.$(OBJEXT) \
+                        $(top_srcdir)/extensions/mo_heating_rates.$(OBJEXT) \
                         $(top_srcdir)/examples/mo_load_coefficients.$(OBJEXT)
 
 
@@ -149,4 +151,4 @@ $(allsky)/mo_load_cloud_coefficients.$(OBJEXT): $(top_srcdir)/examples/mo_simple
                                                 $(cloud_optics)/mo_cloud_optics.$(OBJEXT)
 
 
-CLEANFILES = *.mod
+CLEANFILES = *.mod *__genmod.f90

@@ -1,6 +1,6 @@
 !> @brief Reads in ERA5 formatted data.
 module era5
-use, intrinsic :: iso_fortran_env, only: error_unit
+use, intrinsic :: iso_fortran_env, only: error_unit, output_unit
 
 use netcdf_utils
 
@@ -59,6 +59,7 @@ public :: close_flux_file
 public :: create_atmosphere
 public :: create_flux_file
 public :: destroy_atmosphere
+public :: info
 public :: write_output
 integer, parameter, public :: h2o = 1
 integer, parameter, public :: o3 = 2
@@ -75,13 +76,15 @@ integer, parameter, public :: rld = 5
 integer, parameter, public :: rlu = 6
 integer, parameter, public :: rsd = 7
 integer, parameter, public :: rsu = 8
-
+integer, parameter, public :: rlhr = 9
+integer, parameter, public :: rshr = 10
 
 integer, public :: block_size
 integer :: nlon
 integer :: nlat
 integer :: nlevel
 integer, public :: num_blocks
+logical :: verbosity
 
 
 contains
@@ -201,6 +204,8 @@ subroutine create_atmosphere(atm, parser)
   real(kind=wp), dimension(:,:,:), allocatable :: buffer3d
   real(kind=wp), dimension(:,:,:,:), allocatable :: buffer4d
   character(len=16) :: clim_except_var
+  character(len=16) :: clim_ghg_end
+  character(len=16) :: clim_ghg_start
   character(len=16) :: clim_var
   integer, dimension(4) :: counts
   real(kind=wp), parameter :: dry_air_mass = 28.9647_wp ![g mol-1].
@@ -256,27 +261,36 @@ subroutine create_atmosphere(atm, parser)
   !Add/parse command line arguments.
   call add_argument(parser, "ghg_file", "Input GHG data file.")
   call add_argument(parser, "-b", "Block size.", .true., "--block-size")
-  call add_argument(parser, "-CFC-11", "Year for CFC-11 abundance.", .true.)
-  call add_argument(parser, "-CFC-12", "Year for CFC-12 abundance.", .true.)
-  call add_argument(parser, "-CFC-113", "Year for CFC-113 abundance.", .true.)
-  call add_argument(parser, "-CH4", "Year for CH4 abundance.", .true.)
+  call add_argument(parser, "-CFC-11", "Year for CFC-11 abundance or clim for climatology.", &
+                    .true.)
+  call add_argument(parser, "-CFC-12", "Year for CFC-12 abundance or clim for climatology.", &
+                   .true.)
+  call add_argument(parser, "-CFC-113", "Year for CFC-113 abundance or clim for climatology.", &
+                    .true.)
+  call add_argument(parser, "-CH4", "Year for CH4 abundance or clim for climatology.", .true.)
+  call add_argument(parser, "-clim-ghg-end", "Ending year to use when calculating" &
+                    //"climatology (mean) green-house gas values.", .true.)
+  call add_argument(parser, "-clim-ghg-start", "Starting year to use when calculating" &
+                    //"climatology (mean) green-house gas values.", .true.)
   call add_argument(parser, "-clim-file", "Climatology file.", .true.)
   call add_argument(parser, "-clim-except-var", "Use climatology values for all inputs" &
                     //" except this one.", .true.)
   call add_argument(parser, "-clim-var", "Use climatology values for this input.", &
                     .true.)
   call add_argument(parser, "-clouds", "Include clouds.", .false.)
-  call add_argument(parser, "-CO2", "Year for CO2 abundance.", .true.)
+  call add_argument(parser, "-CO2", "Year for CO2 abundance or clim for climatology.", .true.)
   call add_argument(parser, "-era5_file", "Input data file.", .true.)
-  call add_argument(parser, "-HCFC-22", "Year for HCFC-22 abundance.", .true.)
+  call add_argument(parser, "-HCFC-22", "Year for HCFC-22 abundance or clim for climatology.", &
+                    .true.)
   call add_argument(parser, "-H2O", "Include H2O.", .false.)
   call add_argument(parser, "-monthly", "Use 3 zenith angle approximation for monthly data.", &
                     .false.)
-  call add_argument(parser, "-N2O", "Year for N2O abundance.", .true.)
+  call add_argument(parser, "-N2O", "Year for N2O abundance or clim for climatology.", .true.)
   call add_argument(parser, "-O2", "O2 abundance [ppmv].", .true.)
   call add_argument(parser, "-O3", "Include O3.", .false.)
   call add_argument(parser, "-t", "Starting time index.", .true., "--time-lower-bound")
   call add_argument(parser, "-T", "Ending time index.", .true., "--Time-upper-bound")
+  call add_argument(parser, "-v", "Verbose output.", .false.)
   call add_argument(parser, "-x", "Starting longitude index.", .true., "--lon-lower-bound")
   call add_argument(parser, "-X", "Ending longitude index.", .true., "--lon-upper-bound")
   call add_argument(parser, "-y", "Starting latitude index.", .true., "--lat-lower-bound")
@@ -284,6 +298,10 @@ subroutine create_atmosphere(atm, parser)
   call add_argument(parser, "-z", "Starting layer index.", .true., "--layer-lower-bound")
   call add_argument(parser, "-Z", "Ending layer index.", .true., "--layer-upper-bound")
   call parse_args(parser)
+
+  !Set verbosity level.
+  call get_argument(parser, "-v", buffer)
+  verbosity = trim(buffer) .ne. "not present"
 
   !Check for use of a climatology file.
   call get_argument(parser, "-clim-var", clim_var)
@@ -305,6 +323,7 @@ subroutine create_atmosphere(atm, parser)
       stop 1
     endif
     ncid_era5 = open_dataset(buffer)
+    call info("Using ERA5 input dataset "//trim(buffer)//".")
   endif
   if (using_climatology) then
     !Open the climatology file.
@@ -316,8 +335,11 @@ subroutine create_atmosphere(atm, parser)
     ncid_clim = open_dataset(trim(buffer))
     if (trim(clim_var) .eq. "all") then
       ncid(:) = ncid_clim
+      call info("Using climatology inputs for all variables from "//trim(buffer)//".")
     elseif (trim(clim_var) .ne. "not present") then
       ncid(:) = ncid_era5
+      call info("Using climatology inputs for variable "//trim(clim_var)//" from "&
+                //trim(buffer)//".")
       select case (trim(clim_var))
         case ("fal")
           ncid(albedo_id) = ncid_clim
@@ -352,6 +374,8 @@ subroutine create_atmosphere(atm, parser)
       end select
     elseif (trim(clim_except_var) .ne. "not present") then
       ncid(:) = ncid_clim
+      call info("Using climatology inputs for all variables except "//trim(clim_except_var) &
+                //" from "//trim(buffer)//".")
       select case (trim(clim_except_var))
         case ("fal")
           ncid(albedo_id) = ncid_era5
@@ -692,6 +716,8 @@ subroutine create_atmosphere(atm, parser)
   !Open the greenhouse gas file.
   call get_argument(parser, "ghg_file", buffer)
   ncid(1) = open_dataset(buffer)
+  call get_argument(parser, "-clim-ghg-start", clim_ghg_start)
+  call get_argument(parser, "-clim-ghg-end", clim_ghg_end)
 
   !Get the molecular abundance from their input year.
   molecules(3)%id = co2; molecules(3)%flag = "-CO2"; molecules(3)%name = "co2"
@@ -706,9 +732,30 @@ subroutine create_atmosphere(atm, parser)
     if (trim(buffer) .ne. "not present") then
       atm%num_molecules = atm%num_molecules + 1
       atm%molecules(atm%num_molecules) = molecules(i)%id
-      read(buffer, *) year
-      start(1) = int(year); counts(1) = 1
+      if (trim(buffer) .eq. "clim") then
+        if (trim(clim_ghg_start) .eq. "not present" .or. trim(clim_ghg_end) .eq. &
+            "not present") then
+          write(error_unit, *) "-clim-ghg-start and -clim-ghg-end required when using " &
+                               //trim(molecules(i)%flag)//" clim."
+          stop 1
+        endif
+        read(clim_ghg_start, *) start(1)
+        read(clim_ghg_end, *) counts(1)
+        counts(1) = counts(1) - start(1) + 1
+        if (allocated(buffer1d)) deallocate(buffer1d)
+        allocate(buffer1d(counts(1)))
+        call info("Using mean "//trim(molecules(i)%name)//" concentration value over the" &
+                  //" time period "//trim(clim_ghg_start)//" - "//trim(clim_ghg_end)//".")
+      else
+        read(buffer, *) year
+        start(1) = int(year); counts(1) = 1
+        call info("Using "//trim(molecules(i)%name)//" concentration from year "// &
+                  trim(buffer)//".")
+      endif
       call read_variable(ncid(1), trim(molecules(i)%name), buffer1d, start(1:1), counts(1:1))
+      if (trim(buffer) .eq. "clim") then
+        buffer1d(1) = sum(buffer1d(:))/real(counts(1))
+      endif
       atm%ppmv(:,:,:,:,atm%num_molecules) = buffer1d(1)*from_ppmv
     endif
   enddo
@@ -716,7 +763,7 @@ subroutine create_atmosphere(atm, parser)
 
   !Get the molecular abundance from the command line.
   molecules(10)%id = o2; molecules(10)%flag = "-O2"; molecules(10)%name = "o2"
-  call get_argument(parser, trim(molecules(6)%flag), buffer)
+  call get_argument(parser, trim(molecules(10)%flag), buffer)
   if (trim(buffer) .ne. "not present") then
     atm%num_molecules = atm%num_molecules + 1
     atm%molecules(atm%num_molecules) = molecules(i)%id
@@ -771,12 +818,14 @@ subroutine create_flux_file(output, filepath, atm)
   character(len=*), intent(in) :: filepath !< Path to file.
   type(Atmosphere_t), intent(in) :: atm !< Atmosphere.
 
+  integer, dimension(4) :: dims
   integer, parameter :: lat = 2
+  integer, parameter :: layer = 5
   integer, parameter :: level = 3
   integer, parameter :: lon = 1
-  integer, parameter :: num_dims = 4
-  integer, parameter :: num_vars = 9
-  integer, parameter :: p = 9
+  integer, parameter :: num_dims = 5
+  integer, parameter :: num_vars = 11
+  integer, parameter :: p = 11
   integer, parameter :: time = 4
 
   output%ncid = create_dataset(trim(filepath))
@@ -785,6 +834,7 @@ subroutine create_flux_file(output, filepath, atm)
   output%dimid(lat) = add_dimension(output%ncid, "lat", nlat)
   output%dimid(level) = add_dimension(output%ncid, "level", atm%num_levels)
   output%dimid(time) = add_dimension(output%ncid, "time")
+  output%dimid(layer) = add_dimension(output%ncid, "layer", atm%num_levels - 1)
   allocate(output%varid(num_vars))
   output%varid(lon) = add_variable(output%ncid, output%dimid(lon:lon), &
                                    "lon", "longitude", "degrees_east", axis="X")
@@ -793,23 +843,34 @@ subroutine create_flux_file(output, filepath, atm)
   output%varid(level) = add_variable(output%ncid, output%dimid(level:level), &
                                      "level", "sigma_level", positive="down", &
                                      axis="Z")
+  output%varid(layer) = add_variable(output%ncid, output%dimid(layer:layer), &
+                                     "layer", "sigma_layer", positive="down", &
+                                     axis="Z")
   output%varid(time) = add_variable(output%ncid, output%dimid(time:time), &
                                     "time", "time", "hours since 1900-01-01 00:00:00.0", &
                                     axis="T", calendar="gregorian")
-  output%varid(rld) = add_variable(output%ncid, output%dimid, "rld", &
+  output%varid(rld) = add_variable(output%ncid, output%dimid(lon:time), "rld", &
                                    "downwelling_longwave_flux_in_air", "W m-2")
-  output%varid(rlu) = add_variable(output%ncid, output%dimid, "rlu", &
+  output%varid(rlu) = add_variable(output%ncid, output%dimid(lon:time), "rlu", &
                                    "upwelling_longwave_flux_in_air", "W m-2")
-  output%varid(rsd) = add_variable(output%ncid, output%dimid, "rsd", &
+  output%varid(rsd) = add_variable(output%ncid, output%dimid(lon:time), "rsd", &
                                    "downwelling_shortwave_flux_in_air", "W m-2")
-  output%varid(rsu) = add_variable(output%ncid, output%dimid, "rsu", &
+  output%varid(rsu) = add_variable(output%ncid, output%dimid(lon:time), "rsu", &
                                    "upwelling_shortwave_flux_in_air", "W m-2")
-  output%varid(p) = add_variable(output%ncid, output%dimid, "p", "air_pressure", "mb")
-  call write_variable(output%ncid, lon, atm%longitude)
-  call write_variable(output%ncid, lat, atm%latitude)
-  call write_variable(output%ncid, level, atm%level)
-  call write_variable(output%ncid, time, atm%time)
-  call write_variable(output%ncid, p, atm%reference_pressure)
+  output%varid(p) = add_variable(output%ncid, output%dimid(lon:time), "p", "air_pressure", "mb")
+  dims(1:2) = output%dimid(lon:lat)
+  dims(3) = output%dimid(layer)
+  dims(4) = output%dimid(time)
+  output%varid(rlhr) = add_variable(output%ncid, dims, "rlhr", &
+                                   "longwave_radiative_heating_rate", "K s-1")
+  output%varid(rshr) = add_variable(output%ncid, dims, "rshr", &
+                                   "shortwave_radiative_heating_rate", "K s-1")
+  call write_variable(output%ncid, output%varid(lon), atm%longitude)
+  call write_variable(output%ncid, output%varid(lat), atm%latitude)
+  call write_variable(output%ncid, output%varid(level), atm%level)
+  call write_variable(output%ncid, output%varid(time), atm%time)
+  call write_variable(output%ncid, output%varid(layer), atm%level(:atm%num_levels-1))
+  call write_variable(output%ncid, output%varid(p), atm%reference_pressure)
 end subroutine create_flux_file
 
 
@@ -847,9 +908,17 @@ subroutine write_output(output, id, data, time, block_spot, block_id)
     start(1) = i - (i/nlon)*nlon
   endif
   start(3) = 1; start(4) = time
-  counts(1) = 1; counts(2) = 1; counts(3) = nlevel; counts(4) = 1
-  call write_variable(output%ncid, id, data, start, counts)
+  counts(1) = 1; counts(2) = 1; counts(3) = size(data, 2); counts(4) = 1
+  call write_variable(output%ncid, output%varid(id), data, start, counts)
 end subroutine write_output
+
+
+subroutine info(message)
+
+  character(len=*), intent(in) :: message
+
+  if (verbosity) write(output_unit, *) trim(message)
+end subroutine info
 
 
 end module era5

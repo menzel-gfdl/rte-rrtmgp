@@ -72,12 +72,12 @@ integer, parameter, public :: cfc113 = 8
 integer, parameter, public :: hcfc22 = 9
 integer, parameter, public :: o2 = 10
 integer, parameter, public :: num_molecules = 10
-integer, parameter, public :: rld = 5
-integer, parameter, public :: rlu = 6
-integer, parameter, public :: rsd = 7
-integer, parameter, public :: rsu = 8
-integer, parameter, public :: rlhr = 9
-integer, parameter, public :: rshr = 10
+integer, parameter, public :: rld = 6
+integer, parameter, public :: rlu = 7
+integer, parameter, public :: rsd = 8
+integer, parameter, public :: rsu = 9
+integer, parameter, public :: rlhr = 10
+integer, parameter, public :: rshr = 11
 
 integer, public :: block_size
 integer :: nlon
@@ -824,8 +824,8 @@ subroutine create_flux_file(output, filepath, atm)
   integer, parameter :: level = 3
   integer, parameter :: lon = 1
   integer, parameter :: num_dims = 5
-  integer, parameter :: num_vars = 11
-  integer, parameter :: p = 11
+  integer, parameter :: num_vars = 12
+  integer, parameter :: p = 12
   integer, parameter :: time = 4
 
   output%ncid = create_dataset(trim(filepath))

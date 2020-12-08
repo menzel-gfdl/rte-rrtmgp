@@ -213,6 +213,7 @@ subroutine create_atmosphere(atm, parser)
   real(kind=wp), dimension(:,:,:,:), allocatable :: buffer4d
   character(len=32) :: b1
   character(len=32) :: b2
+  character(len=32) :: b3
   character(len=16) :: clim_except_var
   character(len=16) :: clim_ghg_end
   character(len=16) :: clim_ghg_start
@@ -260,6 +261,7 @@ subroutine create_atmosphere(atm, parser)
   logical :: using_era5_input
   real(kind=wp), parameter :: water_mass = 18.02_wp ![g mol-1].
   real(kind=wp), dimension(:), allocatable :: weights
+  real :: x
   integer :: x_start
   integer :: x_stop
   real(kind=wp), dimension(:,:,:,:), allocatable :: xh2o
@@ -623,8 +625,7 @@ subroutine create_atmosphere(atm, parser)
   !Temperature.
   start(1) = x_start; start(2) = y_start; start(3) = z_start; start(4) = t_start;
   counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_layers; counts(4) = atm%num_times;
-  if (trim(clim_var) .eq. "t" .or. trim(clim_var) .eq. "all" .or. &
-      (trim(clim_except_var) .ne. "not present" .and. trim(clim_except_var) .ne. "t")) then
+  if (trim(clim_var) .eq. "t" .or. trim(clim_var) .eq. "all") then
     call read_variable(ncid_clim, "t", buffer4d, start, counts)
     if (.not. (z_start_clim .eq. z_start .and. z_stop_clim .eq. z_stop)) then
       call read_variable(ncid_era5, "t", temperature, start, counts)
@@ -637,8 +638,25 @@ subroutine create_atmosphere(atm, parser)
     call info("Using climatological temperatures in layers "//trim(adjustl(b1))//" - " &
               //trim(adjustl(b2))//".")
     deallocate(buffer4d)
+  elseif (trim(clim_except_var) .eq. "t") then
+    call read_variable(ncid_era5, "t", buffer4d, start, counts)
+    if (.not. (z_start_clim .eq. z_start .and. z_stop_clim .eq. z_stop)) then
+      call read_variable(ncid_clim, "t", temperature, start, counts)
+      temperature(:,:,z_start_clim:z_stop_clim,:) = buffer4d(:,:,z_start_clim:z_stop_clim,:)
+    else
+      allocate(temperature(size(buffer4d, 1), size(buffer4d, 2), size(buffer4d, 3), &
+                           size(buffer4d, 4)))
+      temperature(:,:,:,:) = buffer4d(:,:,:,:)
+    endif
+    call info("Using era5 temperatures in layers "//trim(adjustl(b1))//" - " &
+              //trim(adjustl(b2))//".")
+    deallocate(buffer4d)
+  elseif (trim(clim_except_var) .ne. "not present" .and. trim(clim_except_var) .ne. "t") then
+    call read_variable(ncid_clim, "t", temperature, start, counts)
+    call info("Using climatological temperatures.")
   else
     call read_variable(ncid_era5, "t", temperature, start, counts)
+    call info("Using era5 temperatures.")
   endif
   allocate(atm%layer_temperature(block_size, atm%num_layers, num_blocks, atm%num_times))
   call xyzt_to_bznt(atm%layer_temperature, temperature)
@@ -665,11 +683,10 @@ subroutine create_atmosphere(atm, parser)
   !Get water abundance.
   start(1) = x_start; start(2) = y_start; start(3) = z_start; start(4) = t_start;
   counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_layers; counts(4) = atm%num_times;
-  if (trim(clim_var) .eq. "q" .or. trim(clim_var) .eq. "all" .or. &
-      (trim(clim_except_var) .ne. "not present" .and. trim(clim_except_var) .ne. "q")) then
+  if (trim(clim_var) .eq. "q" .or. trim(clim_var) .eq. "all") then
     call read_variable(ncid_clim, "q", buffer4d, start, counts)
     if (.not. (z_start_clim .eq. z_start .and. z_stop_clim .eq. z_stop)) then
-      call read_variable(ncid, "q", abundance, start, counts)
+      call read_variable(ncid_era5, "q", abundance, start, counts)
       abundance(:,:,z_start_clim:z_stop_clim,:) = buffer4d(:,:,z_start_clim:z_stop_clim,:)
     else
       allocate(abundance(size(buffer4d, 1), size(buffer4d, 2), size(buffer4d, 3), &
@@ -679,8 +696,25 @@ subroutine create_atmosphere(atm, parser)
     call info("Using climatological water vapor in layers "//trim(adjustl(b1)) &
               //" - "//trim(adjustl(b2))//".")
     deallocate(buffer4d)
+  elseif (trim(clim_except_var) .eq. "q") then
+    call read_variable(ncid_era5, "q", buffer4d, start, counts)
+    if (.not. (z_start_clim .eq. z_start .and. z_stop_clim .eq. z_stop)) then
+      call read_variable(ncid_clim, "q", abundance, start, counts)
+      abundance(:,:,z_start_clim:z_stop_clim,:) = buffer4d(:,:,z_start_clim:z_stop_clim,:)
+    else
+      allocate(abundance(size(buffer4d, 1), size(buffer4d, 2), size(buffer4d, 3), &
+                         size(buffer4d, 4)))
+      abundance(:,:,:,:) = buffer4d(:,:,:,:)
+    endif
+    call info("Using era5 water vapor in layers "//trim(adjustl(b1)) &
+              //" - "//trim(adjustl(b2))//".")
+    deallocate(buffer4d)
+  elseif (trim(clim_except_var) .ne. "not present" .and. trim(clim_except_var) .ne. "q") then
+    call read_variable(ncid_clim, "q", abundance, start, counts)
+    call info("Using climatological water vapor values.")
   else
     call read_variable(ncid_era5, "q", abundance, start, counts)
+    call info("Using era5 water vapor values.")
   endif
   allocate(xh2o(block_size, atm%num_layers, num_blocks, atm%num_times))
   call xyzt_to_bznt(xh2o, abundance)
@@ -702,9 +736,7 @@ subroutine create_atmosphere(atm, parser)
       else
         start(1) = x_start; start(2) = y_start; start(3) = z_start; start(4) = t_start;
         counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_layers; counts(4) = atm%num_times;
-        if (trim(clim_var) .eq. trim(molecules(i)%name) .or. trim(clim_var) .eq. "all" .or. &
-            (trim(clim_except_var) .ne. "not present" .and. &
-            trim(clim_except_var) .ne. trim(molecules(i)%name))) then
+        if (trim(clim_var) .eq. trim(molecules(i)%name) .or. trim(clim_var) .eq. "all") then
           call read_variable(ncid_clim, trim(molecules(i)%name), buffer4d, start, counts)
           if (.not. (z_start_clim .eq. z_start .and. z_stop_clim .eq. z_stop)) then
             call read_variable(ncid_era5, trim(molecules(i)%name), abundance, start, counts)
@@ -717,8 +749,26 @@ subroutine create_atmosphere(atm, parser)
           call info("Using climatological "//trim(molecules(i)%name)//" in layers " &
                     //trim(adjustl(b1))//" - "//trim(adjustl(b2))//".")
           deallocate(buffer4d)
+        elseif (trim(clim_except_var) .eq. trim(molecules(i)%name)) then
+          call read_variable(ncid_era5, trim(molecules(i)%name), buffer4d, start, counts)
+          if (.not. (z_start_clim .eq. z_start .and. z_stop_clim .eq. z_stop)) then
+            call read_variable(ncid_clim, trim(molecules(i)%name), abundance, start, counts)
+            abundance(:,:,z_start_clim:z_stop_clim,:) = buffer4d(:,:,z_start_clim:z_stop_clim,:)
+          else
+            allocate(abundance(size(buffer4d, 1), size(buffer4d, 2), size(buffer4d, 3), &
+                               size(buffer4d, 4)))
+            abundance(:,:,:,:) = buffer4d(:,:,:,:)
+          endif
+          call info("Using era5 "//trim(molecules(i)%name)//" in layers " &
+                    //trim(adjustl(b1))//" - "//trim(adjustl(b2))//".")
+          deallocate(buffer4d)
+        elseif (trim(clim_except_var) .ne. "not present" .and. &
+                trim(clim_except_var) .ne. trim(molecules(i)%name)) then
+          call read_variable(ncid_clim, trim(molecules(i)%name), abundance, start, counts)
+          call info("Using climatology "//trim(molecules(i)%name)//" values.")
         else
           call read_variable(ncid_era5, trim(molecules(i)%name), abundance, start, counts)
+          call info("Using era5 "//trim(molecules(i)%name)//" values.")
         endif
         abundance(:,:,:,:) = (dry_air_mass/molecules(i)%mass)*abundance(:,:,:,:)
         call xyzt_to_bznt(atm%ppmv(:,:,:,:,atm%num_molecules), abundance)
@@ -781,9 +831,7 @@ subroutine create_atmosphere(atm, parser)
     !Read in and calculate cloud inputs.
     start(1) = x_start; start(2) = y_start; start(3) = z_start; start(4) = t_start;
     counts(1) = nlon; counts(2) = nlat; counts(3) = atm%num_layers; counts(4) = atm%num_times;
-    if (trim(clim_var) .eq. "clouds" .or. trim(clim_var) .eq. "cc" .or. trim(clim_var) .eq. "all" .or. &
-        (trim(clim_except_var) .ne. "not present" .and. (trim(clim_except_var) .ne. "clouds" .or. &
-        trim(clim_except_var) .ne. "cc"))) then
+    if (trim(clim_var) .eq. "clouds" .or. trim(clim_var) .eq. "cc" .or. trim(clim_var) .eq. "all") then
       call read_variable(ncid_clim, "cc", buffer4d, start, counts)
       if (.not. (z_start_clim .eq. z_start .and. z_stop_clim .eq. z_stop)) then
         call read_variable(ncid_era5, "cc", abundance, start, counts)
@@ -796,15 +844,31 @@ subroutine create_atmosphere(atm, parser)
       call info("Using climatological cloud cover values in layers " &
                 //trim(adjustl(b1))//" - "//trim(adjustl(b2))//".")
       deallocate(buffer4d)
+    elseif (trim(clim_except_var) .eq. "clouds" .or. trim(clim_except_var) .eq. "cc") then
+      call read_variable(ncid_era5, "cc", buffer4d, start, counts)
+      if (.not. (z_start_clim .eq. z_start .and. z_stop_clim .eq. z_stop)) then
+        call read_variable(ncid_clim, "cc", abundance, start, counts)
+        abundance(:,:,z_start_clim:z_stop_clim,:) = buffer4d(:,:,z_start_clim:z_stop_clim,:)
+      else
+        allocate(abundance(size(buffer4d, 1), size(buffer4d, 2), size(buffer4d, 3), &
+                           size(buffer4d, 4)))
+        abundance(:,:,:,:) = buffer4d(:,:,:,:)
+      endif
+      call info("Using era5 cloud cover values in layers " &
+                //trim(adjustl(b1))//" - "//trim(adjustl(b2))//".")
+      deallocate(buffer4d)
+    elseif (trim(clim_except_var) .ne. "not present" .and. &
+            (trim(clim_except_var) .ne. "clouds" .or. trim(clim_except_var) .ne. "cc")) then
+      call read_variable(ncid_clim, "cc", abundance, start, counts)
+      call info("Using climatological cloud cover values.")
     else
       call read_variable(ncid_era5, "cc", abundance, start, counts)
+      call info("Using era5 cloud cover values.")
     endif
     allocate(atm%cloud_fraction(block_size, atm%num_layers, num_blocks, atm%num_times))
     call xyzt_to_bznt(atm%cloud_fraction, abundance)
     deallocate(abundance)
-    if (trim(clim_var) .eq. "clouds" .or. trim(clim_var) .eq. "ciwc" .or. trim(clim_var) .eq. "all" .or. &
-        (trim(clim_except_var) .ne. "not present" .and. (trim(clim_except_var) .ne. "clouds" .or. &
-        trim(clim_except_var) .ne. "ciwc"))) then
+    if (trim(clim_var) .eq. "clouds" .or. trim(clim_var) .eq. "ciwc" .or. trim(clim_var) .eq. "all") then
       call read_variable(ncid_clim, "ciwc", buffer4d, start, counts)
       if (.not. (z_start_clim .eq. z_start .and. z_stop_clim .eq. z_stop)) then
         call read_variable(ncid_era5, "ciwc", abundance, start, counts)
@@ -817,8 +881,26 @@ subroutine create_atmosphere(atm, parser)
       call info("Using climatological ice water content values in layers " &
                 //trim(adjustl(b1))//" - "//trim(adjustl(b2))//".")
       deallocate(buffer4d)
+    elseif (trim(clim_except_var) .eq. "clouds" .or. trim(clim_except_var) .eq. "ciwc") then
+      call read_variable(ncid_era5, "ciwc", buffer4d, start, counts)
+      if (.not. (z_start_clim .eq. z_start .and. z_stop_clim .eq. z_stop)) then
+        call read_variable(ncid_clim, "ciwc", abundance, start, counts)
+        abundance(:,:,z_start_clim:z_stop_clim,:) = buffer4d(:,:,z_start_clim:z_stop_clim,:)
+      else
+        allocate(abundance(size(buffer4d, 1), size(buffer4d, 2), size(buffer4d, 3), &
+                           size(buffer4d, 4)))
+        abundance(:,:,:,:) = buffer4d(:,:,:,:)
+      endif
+      call info("Using era5 ice water content values in layers " &
+                //trim(adjustl(b1))//" - "//trim(adjustl(b2))//".")
+      deallocate(buffer4d)
+    elseif (trim(clim_except_var) .ne. "not present" .and. &
+            (trim(clim_except_var) .ne. "clouds" .or. trim(clim_except_var) .ne. "ciwc")) then
+      call read_variable(ncid_clim, "ciwc", abundance, start, counts)
+      call info("Using climatological ice water content values.")
     else
       call read_variable(ncid_era5, "ciwc", abundance, start, counts)
+      call info("Using era5 ice water content values.")
     endif
     allocate(atm%cloud_ice_content(block_size, atm%num_layers, num_blocks, atm%num_times))
     call xyzt_to_bznt(atm%cloud_ice_content, abundance)
@@ -828,9 +910,7 @@ subroutine create_atmosphere(atm, parser)
     elsewhere
       atm%cloud_ice_content(:,:,:,:) = 0.
     endwhere
-    if (trim(clim_var) .eq. "clouds" .or. trim(clim_var) .eq. "clwc" .or. trim(clim_var) .eq. "all" .or. &
-        (trim(clim_except_var) .ne. "not present" .and. (trim(clim_except_var) .ne. "clouds" .or. &
-        trim(clim_except_var) .ne. "clwc"))) then
+    if (trim(clim_var) .eq. "clouds" .or. trim(clim_var) .eq. "clwc" .or. trim(clim_var) .eq. "all") then
       call read_variable(ncid_clim, "clwc", buffer4d, start, counts)
       if (.not. (z_start_clim .eq. z_start .and. z_stop_clim .eq. z_stop)) then
         call read_variable(ncid_era5, "clwc", abundance, start, counts)
@@ -843,8 +923,26 @@ subroutine create_atmosphere(atm, parser)
       call info("Using climatological liquid water content values in layers " &
                 //trim(adjustl(b1))//" - "//trim(adjustl(b2))//".")
       deallocate(buffer4d)
+    elseif (trim(clim_except_var) .eq. "clouds" .or. trim(clim_except_var) .eq. "clwc") then
+      call read_variable(ncid_era5, "clwc", buffer4d, start, counts)
+      if (.not. (z_start_clim .eq. z_start .and. z_stop_clim .eq. z_stop)) then
+        call read_variable(ncid_clim, "clwc", abundance, start, counts)
+        abundance(:,:,z_start_clim:z_stop_clim,:) = buffer4d(:,:,z_start_clim:z_stop_clim,:)
+      else
+        allocate(abundance(size(buffer4d, 1), size(buffer4d, 2), size(buffer4d, 3), &
+                           size(buffer4d, 4)))
+        abundance(:,:,:,:) = buffer4d(:,:,:,:)
+      endif
+      call info("Using era5 liquid water content values in layers " &
+                //trim(adjustl(b1))//" - "//trim(adjustl(b2))//".")
+      deallocate(buffer4d)
+    elseif (trim(clim_except_var) .ne. "not present" .and. &
+            (trim(clim_except_var) .ne. "clouds" .or. trim(clim_except_var) .ne. "clwc")) then
+      call read_variable(ncid_clim, "clwc", abundance, start, counts)
+      call info("Using climatological liquid water content values.")
     else
       call read_variable(ncid_era5, "clwc", abundance, start, counts)
+      call info("Using era5 liquid water content values.")
     endif
     allocate(atm%cloud_liquid_content(block_size, atm%num_layers, num_blocks, atm%num_times))
     call xyzt_to_bznt(atm%cloud_liquid_content, abundance)
@@ -881,8 +979,93 @@ subroutine create_atmosphere(atm, parser)
   molecules(8)%id = cfc113; molecules(8)%flag = "-CFC-113"; molecules(8)%name = "f113"
   molecules(9)%id = hcfc22; molecules(9)%flag = "-HCFC-22"; molecules(9)%name = "f22"
   do i = 3, 9
-    if (trim(clim_var) .eq. "ghg" .or. trim(clim_var) .eq. "all" .or. &
-        (trim(clim_except_var) .ne. "not present" .and. trim(clim_except_var) .ne. "ghg")) then
+    if (trim(clim_var) .eq. "ghg" .or. trim(clim_var) .eq. "all") then
+      atm%num_molecules = atm%num_molecules + 1
+      atm%molecules(atm%num_molecules) = molecules(i)%id
+      if (trim(clim_ghg_start) .eq. "not present" .or. trim(clim_ghg_end) .eq. &
+          "not present") then
+        write(error_unit, *) "-clim-ghg-start and -clim-ghg-end required when using " &
+                             //"-clim-var ghg or -clim-var all."
+        stop 1
+      endif
+      read(clim_ghg_start, *) start(1)
+      read(clim_ghg_end, *) counts(1)
+      counts(1) = counts(1) - start(1) + 1
+      if (allocated(buffer1d)) deallocate(buffer1d)
+      allocate(buffer1d(counts(1)))
+      call info("Using mean "//trim(molecules(i)%name)//" concentration value over the" &
+                //" time period "//trim(clim_ghg_start)//" - "//trim(clim_ghg_end)//".")
+      call read_variable(ncid, trim(molecules(i)%name), buffer1d, start(1:1), counts(1:1))
+      buffer1d(1) = sum(buffer1d(:))/real(counts(1))
+      x = buffer1d(1)*from_ppmv
+      write(b3, *) buffer1d(1)
+      if (.not. (z_start_clim .eq. z_start .and. z_stop_clim .eq. z_stop)) then
+        call info("Using mean "//trim(molecules(i)%name)//" abundance "//trim(adjustl(b3)) &
+                  //" [ppmv] in layers "//trim(adjustl(b1))//" - "//trim(adjustl(b2))//".")
+        call get_argument(parser, "-year", buffer)
+        if (trim(buffer) .eq. "not present") then
+          write(error_unit, *) "-year is required when using climatological green-house gas" &
+                               //" values on only a subset of layers."
+          stop 1
+        endif
+        read(buffer, *) start(1)
+        counts(1) = 1
+        call read_variable(ncid, trim(molecules(i)%name), buffer1d, start(1:1), counts(1:1))
+        atm%ppmv(:,:,:,:,atm%num_molecules) = buffer1d(1)*from_ppmv
+        atm%ppmv(:,z_start_clim:z_stop_clim,:,:,atm%num_molecules) = x
+        write(b3, *) buffer1d(1)
+        call info("Using "//trim(molecules(i)%name)//" abundance "//trim(adjustl(b3))// &
+                  " [ppmv] for all other layers.")
+      else
+        atm%ppmv(:,:,:,:,atm%num_molecules) = x
+        call info("Using mean "//trim(molecules(i)%name)//" abundance "//trim(adjustl(b3)) &
+                  //" [ppmv] in all layers.")
+      endif
+    elseif (trim(clim_except_var) .eq. "ghg") then
+      atm%num_molecules = atm%num_molecules + 1
+      atm%molecules(atm%num_molecules) = molecules(i)%id
+      call get_argument(parser, "-year", buffer)
+      if (trim(buffer) .eq. "not present") then
+        write(error_unit, *) "-year is required when using climatological green-house gas" &
+                             //" values on only a subset of layers."
+        stop 1
+      endif
+      read(buffer, *) start(1)
+      counts(1) = 1
+      if (allocated(buffer1d)) deallocate(buffer1d)
+      allocate(buffer1d(counts(1)))
+      call read_variable(ncid, trim(molecules(i)%name), buffer1d, start(1:1), counts(1:1))
+      x = buffer1d(1)*from_ppmv
+      write(b3, *) buffer1d(1)
+      if (.not. (z_start_clim .eq. z_start .and. z_stop_clim .eq. z_stop)) then
+        if (trim(clim_ghg_start) .eq. "not present" .or. trim(clim_ghg_end) .eq. &
+            "not present") then
+          write(error_unit, *) "-clim-ghg-start and -clim-ghg-end required when using " &
+                               //"-clim-except-var ghg and -z-clim-min or -z-clim-max."
+          stop 1
+        endif
+        call info("Using "//trim(molecules(i)%name)//" abundance "//trim(adjustl(b3)) &
+                  //" [ppmv] in layers "//trim(adjustl(b1))//" - "//trim(adjustl(b2))//".")
+        read(clim_ghg_start, *) start(1)
+        read(clim_ghg_end, *) counts(1)
+        counts(1) = counts(1) - start(1) + 1
+        if (allocated(buffer1d)) deallocate(buffer1d)
+        allocate(buffer1d(counts(1)))
+        call info("Using mean "//trim(molecules(i)%name)//" concentration value over the" &
+                  //" time period "//trim(clim_ghg_start)//" - "//trim(clim_ghg_end)//".")
+        call read_variable(ncid, trim(molecules(i)%name), buffer1d, start(1:1), counts(1:1))
+        buffer1d(1) = sum(buffer1d(:))/real(counts(1))
+        atm%ppmv(:,:,:,:,atm%num_molecules) = buffer1d(1)*from_ppmv
+        atm%ppmv(:,z_start_clim:z_stop_clim,:,:,atm%num_molecules) = x
+        write(b3, *) buffer1d(1)
+        call info("Using mean "//trim(molecules(i)%name)//" abundance " &
+                  //trim(adjustl(b3))//" [ppmv] in all other layers.")
+      else
+        atm%ppmv(:,:,:,:,atm%num_molecules) = x
+        call info("Using "//trim(molecules(i)%name)//" abundance "//trim(adjustl(b3)) &
+                  //" [ppmv] in all layers.")
+      endif
+    elseif (trim(clim_except_var) .ne. "not present" .and. trim(clim_except_var) .ne. "ghg") then
       atm%num_molecules = atm%num_molecules + 1
       atm%molecules(atm%num_molecules) = molecules(i)%id
       if (trim(clim_ghg_start) .eq. "not present" .or. trim(clim_ghg_end) .eq. &
@@ -903,21 +1086,6 @@ subroutine create_atmosphere(atm, parser)
       atm%ppmv(:,:,:,:,atm%num_molecules) = buffer1d(1)*from_ppmv
       write(b1, *) buffer1d(1)
       call info("Using mean "//trim(molecules(i)%name)//" abundance "//trim(adjustl(b1))//" [ppmv].")
-      if (.not. (z_start_clim .eq. z_start .and. z_stop_clim .eq. z_stop)) then
-        call get_argument(parser, "-year", buffer)
-        if (trim(buffer) .eq. "not present") then
-          write(error_unit, *) "-year is required when using climatological green-house gas" &
-                               //" values on only a subset of layers."
-          stop 1
-        endif
-        read(buffer, *) start(1)
-        counts(1) = 1
-        call read_variable(ncid, trim(molecules(i)%name), buffer1d, start(1:1), counts(1:1))
-        atm%ppmv(:,z_start_clim:z_stop_clim,:,:,atm%num_molecules) = buffer1d(1)*from_ppmv
-        write(b1, *) buffer1d(1)
-        call info("Using "//trim(molecules(i)%name)//" abundance "//trim(adjustl(b1))// &
-                  " [ppmv] for all other layers.")
-      endif
     else
       call get_argument(parser, trim(molecules(i)%flag), buffer)
       if (trim(buffer) .ne. "not present") then
